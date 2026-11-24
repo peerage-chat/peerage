@@ -658,6 +658,7 @@ internal fun SettingsAboutScreen(onBack: () -> Unit) {
                 ValueRow(stringResource(R.string.settings_encryption_label), stringResource(R.string.settings_encryption_value))
                 ValueRow(stringResource(R.string.settings_license_label), "GPL-3.0")
             }
+            UpdatesCard()
             CardSection {
                 CardRow(onClick = { saveLog.launch(chat.peerage.LogExport.fileName()) }, divider = false, inset = Tokens.Space.l) {
                     Column(Modifier.weight(1f).padding(vertical = Tokens.Space.xs)) {
@@ -669,6 +670,48 @@ internal fun SettingsAboutScreen(onBack: () -> Unit) {
                             modifier = Modifier.padding(top = Tokens.Space.xxs),
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Обновления в «О приложении» (app-ui.md → «Обновления»): тумблер ежедневной проверки и
+ * «Проверить сейчас» с итогом. Ручная проверка — сама по себе согласие на этот запрос.
+ */
+@Composable
+private fun UpdatesCard() {
+    val s = Updates.state
+    CardSection {
+        PrivacySwitch(
+            title = stringResource(R.string.update_toggle),
+            sub = stringResource(R.string.update_consent_sub),
+            checked = Updates.facts.consent == true,
+            divider = false,
+            onChange = Updates::setConsent,
+        )
+        val result = when (s) {
+            UpdateState.Checking -> stringResource(R.string.update_checking)
+            UpdateState.UpToDate -> stringResource(R.string.update_latest)
+            UpdateState.CheckFailed -> stringResource(R.string.update_offline)
+            is UpdateState.Available -> stringResource(R.string.update_available, s.info.versionName)
+            is UpdateState.Downloading -> stringResource(R.string.update_downloading)
+            is UpdateState.Ready -> stringResource(R.string.update_ready)
+            is UpdateState.DownloadFailed -> stringResource(R.string.update_failed)
+            UpdateState.Rejected -> stringResource(R.string.update_rejected)
+            UpdateState.Idle -> null
+        }
+        CardRow(onClick = Updates::check, inset = Tokens.Space.l) {
+            Column(Modifier.weight(1f).padding(vertical = Tokens.Space.xs)) {
+                Text(stringResource(R.string.update_check_now), color = Color.White, fontSize = Tokens.Font.name)
+                if (result != null) {
+                    Text(
+                        result,
+                        color = Tokens.Colors.tertiary,
+                        fontSize = Tokens.Font.body,
+                        modifier = Modifier.padding(top = Tokens.Space.xxs),
+                    )
                 }
             }
         }

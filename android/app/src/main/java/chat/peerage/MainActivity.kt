@@ -163,6 +163,7 @@ class MainActivity : ComponentActivity() {
         // Поднимаем mesh-узел при выходе на передний план (в т.ч. после кнопки
         // «Отключить» в уведомлении): держим процесс/сеть живыми при погасшем экране.
         ConnService.start(applicationContext)
+        Updates.onForeground()
     }
 
     override fun onStop() {

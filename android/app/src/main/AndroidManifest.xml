@@ -36,6 +36,8 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Показывать звонок поверх экрана блокировки (fullScreenIntent). -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- Обновление из приложения (п. 46): установку подтверждает системный установщик. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Экраны «Автозапуск» прошивок (Autostart.kt): без видимости пакета с Android 11 их
          не найти, и строка в разрешениях первого запуска не появится. -->
@@ -139,6 +141,10 @@
         <!-- Кнопки «Ответить»/«Прочитано» в уведомлении о сообщении (7b). -->
         <receiver
             android:name=".MessageActionReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".UpdateReceiver"
             android:exported="false" />
 
         <!-- Кнопки «Принять»/«Отклонить» в уведомлении о входящем звонке. -->

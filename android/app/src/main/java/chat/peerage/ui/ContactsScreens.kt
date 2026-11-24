@@ -165,7 +165,9 @@ internal fun ContactsScreen(
     // чатами, а не занимают экран постоянно. Шапка и вкладки остаются на месте.
     val strips: @Composable () -> Unit = {
         QueueStrip(model, nav.openOutbox)
-        BackupStripView(model, nav)
+        // Одна полоса за раз: копии важнее обновлений.
+        val backup = backupStripNow(model)
+        if (backup != null) BackupStripView(model, nav, backup) else UpdateStripView()
         // Счётчик пиров переехал в шапку (PeerIndicator). Здесь — только бенч-замер
         // приёма, пока он активен (диагностика; запуск — долгим тапом по индикатору).
         if (model.benchRecv) {
@@ -546,11 +548,8 @@ private fun QueueStrip(model: AppModel, onOpen: () -> Unit) {
  * копиях»). Какое и когда — решает [chat.peerage.BackupFacts]; «Позже» только откладывает.
  * Янтарные — когда ключ под угрозой, нейтральные — плановое.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun BackupStripView(model: AppModel, nav: HomeNav) {
-    val hasChats = model.chatSummaries.values.any { it.lastTime > 0 }
-    val strip = model.backupFacts.strip(System.currentTimeMillis() / 1000, hasChats) ?: return
+private fun BackupStripView(model: AppModel, nav: HomeNav, strip: BackupStrip) {
     val amber = strip == BackupStrip.KEY_MISSING || strip == BackupStrip.KEY_CHECK_FAILED
     val title: String
     val text: String
@@ -600,6 +599,127 @@ private fun BackupStripView(model: AppModel, nav: HomeNav) {
             onSecondary = { model.backupLater(strip) }
         }
     }
+    HomeStrip(
+        icon = when (strip) {
+            BackupStrip.KEY_CHECK_FAILED -> TablerIcons.AlertTriangle
+            BackupStrip.DATA_STALE -> TablerIcons.Database
+            else -> TablerIcons.Key
+        },
+        amber = amber,
+        title = title,
+        text = text,
+        primary = primary,
+        onPrimary = onPrimary,
+        secondary = secondary,
+        onSecondary = onSecondary,
+    )
+}
+
+/** Какая полоса копий видна сейчас; null — никакая (тогда очередь за обновлениями). */
+private fun backupStripNow(model: AppModel): BackupStrip? {
+    val hasChats = model.chatSummaries.values.any { it.lastTime > 0 }
+    return model.backupFacts.strip(System.currentTimeMillis() / 1000, hasChats)
+}
+
+/**
+ * Полоса обновлений (app-ui.md → «Обновления»): разовый вопрос о согласии, новая версия,
+ * загрузка, установка. Видна, только когда нет полосы копий.
+ */
+@Composable
+private fun UpdateStripView() {
+    val now = System.currentTimeMillis() / 1000
+    val facts = Updates.facts
+    val later = stringResource(R.string.backup_later)
+    if (facts.consent == null) {
+        HomeStrip(
+            icon = TablerIcons.Download,
+            title = stringResource(R.string.update_consent),
+            text = stringResource(R.string.update_consent_sub),
+            primary = stringResource(R.string.update_consent_yes),
+            onPrimary = { Updates.setConsent(true) },
+            secondary = stringResource(R.string.update_consent_no),
+            onSecondary = { Updates.setConsent(false) },
+        )
+        return
+    }
+    when (val s = Updates.state) {
+        is UpdateState.Available -> if (facts.shows(s.info, now)) {
+            HomeStrip(
+                icon = TablerIcons.Download,
+                title = stringResource(R.string.update_available, s.info.versionName),
+                text = stringResource(R.string.update_available_sub, installedVersion(), mb(s.info.size)),
+                primary = stringResource(R.string.update_go),
+                onPrimary = Updates::download,
+                secondary = later,
+                onSecondary = Updates::later,
+            )
+        }
+        is UpdateState.Downloading -> HomeStrip(
+            icon = TablerIcons.Download,
+            title = stringResource(R.string.update_downloading),
+            text = stringResource(R.string.update_downloading_sub, mb(s.done), mb(s.info.size)),
+            progress = s.done.toFloat() / s.info.size,
+            primary = stringResource(R.string.update_cancel),
+            onPrimary = Updates::cancel,
+        )
+        is UpdateState.Ready -> if (facts.shows(s.info, now)) {
+            HomeStrip(
+                icon = TablerIcons.Download,
+                title = stringResource(R.string.update_ready),
+                text = stringResource(R.string.update_ready_sub, s.info.versionName),
+                primary = stringResource(R.string.update_install),
+                onPrimary = Updates::installAgain,
+                secondary = later,
+                onSecondary = Updates::later,
+            )
+        }
+        is UpdateState.DownloadFailed -> HomeStrip(
+            icon = TablerIcons.Download,
+            title = stringResource(R.string.update_failed),
+            text = stringResource(R.string.update_offline),
+            primary = stringResource(R.string.update_retry),
+            onPrimary = Updates::download,
+            secondary = later,
+            onSecondary = Updates::later,
+        )
+        UpdateState.Rejected -> HomeStrip(
+            icon = TablerIcons.AlertTriangle,
+            amber = true,
+            title = stringResource(R.string.update_rejected),
+            text = stringResource(R.string.update_rejected_sub),
+            primary = later,
+            onPrimary = Updates::later,
+        )
+        else -> Unit
+    }
+}
+
+/** Мегабайты для полосы — целыми. */
+private fun mb(bytes: Long): String = ((bytes + 512 * 1024) / (1024 * 1024)).toString()
+
+@Composable
+private fun installedVersion(): String {
+    val ctx = LocalContext.current
+    return remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull().orEmpty() }
+}
+
+/**
+ * Полоса над списком главной: значок, заголовок, пояснение, одна-две пилюли. Янтарная —
+ * когда что-то под угрозой, нейтральная — плановое. [progress] — полоска загрузки.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun HomeStrip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    text: String,
+    primary: String,
+    onPrimary: () -> Unit,
+    secondary: String? = null,
+    onSecondary: () -> Unit = {},
+    amber: Boolean = false,
+    progress: Float? = null,
+) {
     val fg = if (amber) Tokens.Colors.queueText else Color.White
     val sub = if (amber) Tokens.Colors.queueSub else Tokens.Colors.secondary
     Column(
@@ -612,11 +732,7 @@ private fun BackupStripView(model: AppModel, nav: HomeNav) {
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
             Icon(
-                when (strip) {
-                    BackupStrip.KEY_CHECK_FAILED -> TablerIcons.AlertTriangle
-                    BackupStrip.DATA_STALE -> TablerIcons.Database
-                    else -> TablerIcons.Key
-                },
+                icon,
                 null,
                 tint = if (amber) Tokens.Colors.stripAmber else Tokens.Colors.accent,
                 modifier = Modifier.size(Tokens.Size.iconRow),
@@ -630,6 +746,15 @@ private fun BackupStripView(model: AppModel, nav: HomeNav) {
                     lineHeight = Tokens.Font.lineHeightLoose,
                     modifier = Modifier.padding(top = Tokens.Space.xxs),
                 )
+                if (progress != null) {
+                    androidx.compose.material3.LinearProgressIndicator(
+                        progress = { progress.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().padding(top = Tokens.Space.s),
+                        color = Tokens.Colors.accent,
+                        trackColor = Tokens.Colors.accentMuted,
+                        drawStopIndicator = {},
+                    )
+                }
             }
         }
         // Переносом, а не обрезкой: «Сверить» и «Проверить ещё раз» на крупном шрифте в строку не встают.
@@ -643,7 +768,7 @@ private fun BackupStripView(model: AppModel, nav: HomeNav) {
                 fg = if (amber) Tokens.Colors.onStripAmber else Tokens.Colors.accentSoft,
                 onClick = onPrimary,
             )
-            StripPill(secondary, bg = Color.Transparent, fg = sub, onClick = onSecondary)
+            if (secondary != null) StripPill(secondary, bg = Color.Transparent, fg = sub, onClick = onSecondary)
         }
     }
 }

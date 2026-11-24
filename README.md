@@ -106,9 +106,14 @@ releases:
 - **APK filter:** `arm64-v8a\.apk$`
 - **Include prereleases:** on (beta releases are pre-releases)
 
-Each release also carries `update.json` (version, file hash, certificate fingerprint). The format is in [docs/release.md](docs/release.md). The app does not check
-for updates by itself: a request to GitHub would reveal the IP address and the fact of
-using Peerage.
+Each release also carries `update.json` (version, file hash, certificate fingerprint). The format is in [docs/release.md](docs/release.md).
+
+### Updates from the app
+
+Since 0.4.0 the app can check GitHub releases itself, once a day. It asks first: the
+request reveals the IP address and the fact of using Peerage to GitHub. The answer can be
+changed in Settings → About. The downloaded APK is checked against `update.json` and against
+the signature of the installed app, and the system installer asks before installing.
 
 ## Report a bug
 

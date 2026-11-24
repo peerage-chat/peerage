@@ -1403,4 +1403,28 @@
     <string name="entry_add_err_invalid">Нужен адрес вида tls://, tcp:// или quic:// с портом</string>
     <string name="entry_add_err_duplicate">Такой узел уже есть</string>
     <string name="entry_add_confirm">Добавить</string>
+
+    <!-- Обновления (п. 46, app-ui.md → «Обновления») -->
+    <string name="update_consent">Проверка обновлений</string>
+    <string name="update_consent_sub">Раз в сутки — запрос к GitHub, ему виден IP-адрес.</string>
+    <string name="update_consent_yes">Проверять</string>
+    <string name="update_consent_no">Не проверять</string>
+    <string name="update_toggle">Проверять обновления</string>
+    <string name="update_check_now">Проверить сейчас</string>
+    <string name="update_checking">Проверка…</string>
+    <string name="update_latest">Установлена последняя версия</string>
+    <string name="update_available">Доступна версия %1$s</string>
+    <string name="update_available_sub">Установлена %1$s · %2$s МБ</string>
+    <string name="update_go">Обновить</string>
+    <string name="update_downloading">Загрузка обновления</string>
+    <string name="update_downloading_sub">%1$s из %2$s МБ</string>
+    <string name="update_cancel">Отменить</string>
+    <string name="update_ready">Обновление загружено</string>
+    <string name="update_ready_sub">%1$s ставится системным установщиком</string>
+    <string name="update_install">Установить</string>
+    <string name="update_failed">Обновление не загрузилось</string>
+    <string name="update_offline">Нет связи с GitHub</string>
+    <string name="update_retry">Повторить</string>
+    <string name="update_rejected">Обновление не прошло проверку</string>
+    <string name="update_rejected_sub">Файл не совпал с подписью приложения и удалён.</string>
 </resources>

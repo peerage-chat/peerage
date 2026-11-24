@@ -1323,4 +1323,28 @@
     <string name="entry_add_err_invalid">Use an address like tls://, tcp:// or quic:// with a port</string>
     <string name="entry_add_err_duplicate">This node is already in the list</string>
     <string name="entry_add_confirm">Add</string>
+
+    <!-- Обновления (п. 46, app-ui.md → «Обновления») -->
+    <string name="update_consent">Update check</string>
+    <string name="update_consent_sub">Once a day, a request to GitHub; GitHub sees the IP address.</string>
+    <string name="update_consent_yes">Check</string>
+    <string name="update_consent_no">Don\'t check</string>
+    <string name="update_toggle">Check for updates</string>
+    <string name="update_check_now">Check now</string>
+    <string name="update_checking">Checking…</string>
+    <string name="update_latest">Latest version installed</string>
+    <string name="update_available">Version %1$s available</string>
+    <string name="update_available_sub">Installed: %1$s · %2$s MB</string>
+    <string name="update_go">Update</string>
+    <string name="update_downloading">Downloading update</string>
+    <string name="update_downloading_sub">%1$s of %2$s MB</string>
+    <string name="update_cancel">Cancel</string>
+    <string name="update_ready">Update downloaded</string>
+    <string name="update_ready_sub">%1$s is installed by the system installer</string>
+    <string name="update_install">Install</string>
+    <string name="update_failed">Update not downloaded</string>
+    <string name="update_offline">No connection to GitHub</string>
+    <string name="update_retry">Retry</string>
+    <string name="update_rejected">Update failed verification</string>
+    <string name="update_rejected_sub">The file did not match the app signature and was deleted.</string>
 </resources>
