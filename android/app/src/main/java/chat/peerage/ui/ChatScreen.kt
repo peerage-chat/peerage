@@ -28,7 +28,9 @@ import androidx.compose.foundation.content.MediaType
 import androidx.compose.foundation.content.consume
 import androidx.compose.foundation.content.contentReceiver
 import androidx.compose.foundation.content.hasMediaType
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.WindowInsets
@@ -69,6 +71,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
@@ -77,6 +80,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.HorizontalAlignmentLine
 import androidx.compose.ui.layout.boundsInRoot
@@ -105,6 +109,7 @@ import chat.peerage.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 @Composable
 internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Unit, onMedia: () -> Unit) {
@@ -1171,6 +1176,10 @@ internal fun MessageRow(
     val bubbleRow = !m.system && !m.isCall && !m.deleted
     Box(
         Modifier.fillMaxWidth()
+            // Зазор между блоками — вне подсветки (п. 47): выделенное сообщение не
+            // захватывает пустое место до чужого. Внутри блока зазор под подсветкой, чтобы
+            // подряд выделенные сообщения одного автора шли сплошной полосой.
+            .padding(bottom = if (bubbleRow) blockGap(pos) - innerGap(pos) else 0.dp)
             .background(rowFill)
             .then(
                 if (drag != null && m.selectable) Modifier.onGloballyPositioned { drag.rows[ref] = it.boundsInRoot() } else Modifier,
@@ -1220,29 +1229,43 @@ private fun SwipeToReply(modifier: Modifier, enabled: Boolean, onReply: () -> Un
     Box(
         modifier.pointerInput(enabled) {
             if (!enabled) return@pointerInput
-            var active = false
-            var armed = false
             val settle = { scope.launch { offset.animateTo(0f, tween(Tokens.Anim.normal)) } }
-            detectHorizontalDragGestures(
-                onDragStart = { start ->
-                    active = start.x < size.width - edge
-                    armed = false
-                },
-                onDragEnd = {
-                    if (armed) latestReply()
-                    settle()
-                },
-                onDragCancel = { settle() },
-            ) { change, dx ->
-                if (!active) return@detectHorizontalDragGestures
-                // Дальше порога тянется туже: видно, что дальше тянуть незачем.
-                val raw = offset.value + if (-offset.value > threshold) dx / 3 else dx
-                val v = raw.coerceIn(-threshold * 1.5f, 0f)
-                change.consume()
-                scope.launch { offset.snapTo(v) }
-                val now = -v >= threshold
-                if (now && !armed) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                armed = now
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                if (down.position.x >= size.width - edge) return@awaitEachGesture
+                // Захват — только явно горизонтального жеста влево (п. 49): ряд видит касание
+                // раньше ленты, и detectHorizontalDragGestures забирал диагональную прокрутку,
+                // едва сдвиг по X переходил порог. Здесь, как у свайпа «назад» (п. 40),
+                // нужен |dx| > 2|dy|; иначе жест остаётся ленте.
+                var total = Offset.Zero
+                var claimed = false
+                while (!claimed) {
+                    val ev = awaitPointerEvent()
+                    val c = ev.changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
+                    if (!c.pressed || c.isConsumed) return@awaitEachGesture
+                    total += c.positionChange()
+                    if (total.getDistance() < viewConfiguration.touchSlop) continue
+                    if (total.x < 0 && abs(total.x) > 2 * abs(total.y)) {
+                        claimed = true
+                        c.consume()
+                    } else {
+                        return@awaitEachGesture
+                    }
+                }
+                var armed = false
+                val done = horizontalDrag(down.id) { change ->
+                    val dx = change.positionChange().x
+                    // Дальше порога тянется туже: видно, что дальше тянуть незачем.
+                    val raw = offset.value + if (-offset.value > threshold) dx / 3 else dx
+                    val v = raw.coerceIn(-threshold * 1.5f, 0f)
+                    change.consume()
+                    scope.launch { offset.snapTo(v) }
+                    val now = -v >= threshold
+                    if (now && !armed) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    armed = now
+                }
+                if (done && armed) latestReply()
+                settle()
             }
         },
     ) {
@@ -1365,7 +1388,7 @@ private fun MessageBubble(
         MsgMeta(m.time, ticks, m.editedAt > 0, shownStatus(model, m, group))
     }
     Row(
-        modifier.fillMaxWidth().padding(bottom = blockGap(pos)),
+        modifier.fillMaxWidth().padding(bottom = innerGap(pos)),
         horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start,
     ) {
         Column(horizontalAlignment = if (m.mine) Alignment.End else Alignment.Start) {

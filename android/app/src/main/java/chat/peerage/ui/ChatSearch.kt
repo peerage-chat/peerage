@@ -779,6 +779,6 @@ private fun MemberSheet(model: AppModel, gid: String, onClose: () -> Unit, onPic
 internal fun PagingNewer(model: AppModel, listState: LazyListState, chat: ChatTarget) {
     LaunchedEffect(chat) {
         snapshotFlow { listState.firstVisibleItemIndex to listState.layoutInfo.totalItemsCount }
-            .collect { (first, _) -> if (first <= 3) model.loadNewer(chat) }
+            .collect { (first, _) -> if (first <= PAGING_AHEAD) model.loadNewer(chat) }
     }
 }

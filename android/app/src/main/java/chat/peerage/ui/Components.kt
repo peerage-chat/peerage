@@ -947,6 +947,10 @@ internal fun blockPos(withPrev: Boolean, withNext: Boolean): BlockPos = when {
 internal fun blockGap(pos: BlockPos) =
     if (pos == BlockPos.First || pos == BlockPos.Mid) Tokens.Space.xxs else Tokens.Space.s
 
+/** Часть [blockGap] под подсветкой выделения: внутри блока — вся, после блока — ничего. */
+internal fun innerGap(pos: BlockPos) =
+    if (pos == BlockPos.First || pos == BlockPos.Mid) Tokens.Space.xxs else 0.dp
+
 /**
  * Текст сообщения с метой (время, «изм.», галочка) в правом нижнем углу — так,
  * что текст ОБТЕКАЕТ мету: короткая последняя строка пускает мету к себе, длинная
@@ -1336,9 +1340,17 @@ internal fun PagingOlder(listState: LazyListState, key: Any?, load: () -> Unit) 
         snapshotFlow {
             val info = listState.layoutInfo
             (info.visibleItemsInfo.lastOrNull()?.index ?: -1) to info.totalItemsCount
-        }.collect { (last, count) -> if (count > 0 && last >= count - 4) load() }
+        }.collect { (last, count) -> if (count > 0 && last >= count - PAGING_AHEAD) load() }
     }
 }
+
+/**
+ * За сколько рядов до края ленты просить следующую страницу (п. 48). Страница — 200
+ * сообщений (`HISTORY_PAGE` движка); при запасе в 4 ряда быстрая прокрутка упиралась в
+ * край раньше, чем страница приходила, и инерция гасла. Треть страницы — запас на
+ * чтение базы и разбор, пока лента ещё едет.
+ */
+internal const val PAGING_AHEAD = 60
 
 /**
  * Довести ленту до низа на НОВОЕ сообщение — если человек и так внизу или написал
