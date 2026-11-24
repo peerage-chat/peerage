@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -48,7 +49,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.Measurable
-import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -57,12 +57,15 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.text
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
@@ -1011,46 +1014,47 @@ internal fun BubbleText(
             }
         }
     }
-    SubcomposeLayout(modifier) { constraints ->
-        // Мету здесь только ИЗМЕРЯЕМ, чтобы оставить ей место. Рисует её сам пузырь,
-        // в своём правом нижнем углу: у пузыря шире текста (метка «Переслано», имя
-        // автора) прижатая к концу строки мета повисла бы посередине, а растянуться
-        // до ширины соседей этот layout не может.
-        val metaP = subcompose("meta", meta).map { it.measure(Constraints()) }
+    // Один Layout и одна вёрстка текста на пузырь (п. 19): раньше здесь были SubcomposeLayout
+    // (отдельная композиция на каждое измерение) и Text поверх замера — текст верстался два-три
+    // раза на каждый пузырь, въезжающий в ленту. Текст рисуется прямо из замера.
+    val shown = remember { arrayOfNulls<TextLayoutResult>(1) }
+    Layout(
+        meta,
+        modifier.then(mentionTap)
+            .semantics { this.text = text }
+            .drawBehind { shown[0]?.let { drawText(it) } },
+    ) { measurables, constraints ->
+        // Мету здесь только ИЗМЕРЯЕМ, чтобы оставить ей место, и не ставим. Рисует её сам
+        // пузырь, в своём правом нижнем углу: у пузыря шире текста (метка «Переслано», имя
+        // автора) прижатая к концу строки мета повисла бы посередине.
+        val metaP = measurables.map { it.measure(Constraints()) }
         val metaW = metaP.maxOfOrNull { it.width } ?: 0
         val metaH = metaP.maxOfOrNull { it.height } ?: 0
         val gap = Tokens.Space.s.roundToPx() // зазор между текстом и метой
 
-        // Стиль ОДИН на измерение и на показ: разойдись они хоть на межбуквенный
-        // интервал — расчёт «влезает ли мета» пойдёт по одной ширине строки, а
-        // нарисуется другая, и время слипнется с текстом.
-        // Решаем САМИ, влезает ли мета в конец последней строки: меряем текст и
-        // смотрим, где эта строка кончается. Прежний вариант — невидимая вставка
-        // размера меты в конце текста — отдавал решение движку переноса, и тот
-        // считал её частью последнего слова: мета уезжала на отдельную строку даже
-        // когда рядом было полно места, а место под неё всё равно резервировалось
-        // сбоку.
-        val m = measurer.measure(
-            text,
-            style,
-            constraints = Constraints(maxWidth = constraints.maxWidth),
-        )
-        // Перенесённый текст занимает всю доступную ширину, хотя самая длинная строка
-        // короче: пузырь раздувало пустым местом справа. Ширина — по самой длинной строке
-        // (переносы при ней те же, она в неё влезает по построению).
+        // Решаем САМИ, влезает ли мета в конец последней строки: меряем текст и смотрим, где
+        // эта строка кончается. Невидимая вставка размера меты в конце текста отдавала решение
+        // движку переноса, и тот считал её частью последнего слова.
+        val m = measurer.measure(text, style, constraints = Constraints(maxWidth = constraints.maxWidth))
+        // Перенесённый текст занимает всю доступную ширину, хотя самая длинная строка короче:
+        // пузырь раздувало пустым местом справа. Ширина — по самой длинной строке (переносы при
+        // ней те же, она в неё влезает по построению).
         val widest = (0 until m.lineCount).maxOf { m.getLineRight(it) - m.getLineLeft(it) }
         val tight = kotlin.math.ceil(widest).toInt().coerceIn(constraints.minWidth, constraints.maxWidth)
-        val textP = subcompose("text") {
-            Text(text, style = style, onTextLayout = { layout = it }, modifier = mentionTap)
-        }.first().measure(constraints.copy(maxWidth = tight))
+        // Строки слева направо стоят у левого края при любой ширине — замер годится как есть.
+        // Справа налево прижаты к правому: такой текст верстаем заново по узкой ширине.
+        val ltr = (0 until m.lineCount).all { m.getParagraphDirection(m.getLineStart(it)) == ResolvedTextDirection.Ltr }
+        val laid = if (ltr || tight == constraints.maxWidth) m else measurer.measure(text, style, constraints = Constraints(maxWidth = tight))
+        shown[0] = laid
+        layout = laid
         val lastRight = m.getLineRight(m.lineCount - 1).toInt()
         val fits = lastRight + gap + metaW <= constraints.maxWidth
 
-        val width = if (fits) maxOf(textP.width, lastRight + gap + metaW) else textP.width
-        // Не влезла — отдаём ей строку под текстом. Ширину при этом НЕ трогаем:
-        // сбоку резервировать нечего, мета уже не в строке.
-        val height = textP.height + if (fits) 0 else metaH
-        layout(width, height) { textP.place(0, 0) }
+        val width = if (fits) maxOf(tight, lastRight + gap + metaW) else tight
+        // Не влезла — отдаём ей строку под текстом. Ширину при этом НЕ трогаем: сбоку
+        // резервировать нечего, мета уже не в строке.
+        val height = laid.size.height + if (fits) 0 else metaH
+        layout(width.coerceAtMost(constraints.maxWidth), height) {}
     }
 }
 
@@ -1333,17 +1337,62 @@ internal fun PagingOlder(listState: LazyListState, key: Any?, load: () -> Unit) 
  * в группе выдёргивало из середины переписки.
  *
  * Ориентир — пара «автор + id» последнего, а не размер списка: догрузка старых тоже
- * меняет размер. «Внизу» — первые два элемента: новое вставляется под видимым, и на
- * момент проверки лента уже сдвинута на один.
+ * меняет размер.
+ *
+ * Лента стоит у низа и пришло ОДНО новое — держим её у элемента 0 в том же кадре
+ * ([LazyListState.requestScrollToItem]). Иначе LazyColumn держится за прежний первый
+ * элемент: новое вставало под краем, и лента докручивалась к нему отдельной прокруткой
+ * уже после появления — рывком (п. 20). Такое сообщение возвращается в наборе «свежих»:
+ * его ряд выезжает снизу на свою высоту, а лента уступает место тем же движением
+ * ([FeedItem]). Пачка (догрузка, офлайн-досылка) — по-старому, прокруткой.
+ *
+ * [chat] — ключ чата: экран чата один на все чаты, и смена чата — не «новое сообщение».
  */
 @Composable
-internal fun FollowNewest(listState: LazyListState, msgs: List<Message>) {
+internal fun FollowNewest(listState: LazyListState, msgs: List<Message>, chat: String): MutableSet<MsgRef> {
+    val fresh = remember(chat) { HashSet<MsgRef>() }
     val last = msgs.lastOrNull()
-    LaunchedEffect(last?.sender, last?.id) {
-        if (last != null && (last.mine || listState.firstVisibleItemIndex <= 1)) {
-            listState.animateScrollToItem(0)
+    val ref = last?.let { MsgRef(it.id, it.sender) }
+    // Последнее на прошлой композиции. Не состояние: прочитать и сразу переписать.
+    val seen = remember(chat) { arrayOf(ref) }
+    var anchored = false
+    if (ref != seen[0]) {
+        val before = msgs.getOrNull(msgs.size - 2)?.let { MsgRef(it.id, it.sender) }
+        if (ref != null && seen[0] != null && before == seen[0] && listState.firstVisibleItemIndex == 0) {
+            listState.requestScrollToItem(0)
+            fresh += ref
+            anchored = true
         }
+        seen[0] = ref
     }
+    LaunchedEffect(last?.sender, last?.id) {
+        if (anchored || last == null) return@LaunchedEffect
+        // «Внизу» — первые два элемента: новое вставилось под видимым, лента сдвинута на один.
+        if (last.mine || listState.firstVisibleItemIndex <= 1) listState.animateScrollToItem(0)
+    }
+    return fresh
+}
+
+/** Движение ряда ленты: место уступается плавно (новое снизу, удаление, реакция). */
+private val feedPlacement = tween<androidx.compose.ui.unit.IntOffset>(Tokens.Anim.normal, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+
+/**
+ * Ряд ленты (элемент LazyColumn). Свежее ([FollowNewest]) выезжает снизу на свою высоту тем же
+ * темпом, каким лента уступает ему место: вся переписка едет вверх одним движением, новое
+ * выходит из-под поля ввода (п. 20). Прежняя анимация — проявление со сдвигом на 24 px —
+ * запускалась заново каждый раз, когда ряд возвращался на экран прокруткой.
+ */
+@Composable
+internal fun androidx.compose.foundation.lazy.LazyItemScope.FeedItem(fresh: MutableSet<MsgRef>, ref: MsgRef, content: @Composable () -> Unit) {
+    // Свежесть забирается один раз: ряд, ушедший за край и вернувшийся, уже не выезжает.
+    val rise = remember { androidx.compose.animation.core.Animatable(if (fresh.remove(ref)) 0f else 1f) }
+    LaunchedEffect(Unit) {
+        if (rise.value < 1f) rise.animateTo(1f, tween(Tokens.Anim.normal, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+    }
+    Column(
+        Modifier.animateItem(fadeInSpec = null, placementSpec = feedPlacement)
+            .graphicsLayer { translationY = (1f - rise.value) * size.height },
+    ) { content() }
 }
 
 /**

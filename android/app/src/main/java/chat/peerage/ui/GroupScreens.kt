@@ -83,7 +83,7 @@ private fun GroupChatContent(model: AppModel, onMedia: (MediaTab) -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     // Лента привязана к низу, как в ChatScreen.
-    FollowNewest(listState, msgs)
+    val fresh = FollowNewest(listState, msgs, gid)
     JumpToMessage(model, listState, msgs)
     PagingOlder(listState, gid) { model.loadOlder(gid, {}, group = true) }
     val chat = ChatTarget(gid, group = true)
@@ -143,7 +143,7 @@ private fun GroupChatContent(model: AppModel, onMedia: (MediaTab) -> Unit) {
             } else {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     CompositionLocalProvider(LocalSearchMarks provides searchMarks(search)) {
-                        GroupFeed(model, msgs, listState)
+                        GroupFeed(model, msgs, listState, fresh)
                     }
                     JumpCapsule(model, listState, chat, Modifier.align(Alignment.BottomEnd))
                     FeedSeen(model, listState, msgs, chat)
@@ -228,12 +228,12 @@ private fun GroupChatContent(model: AppModel, onMedia: (MediaTab) -> Unit) {
 
 /** Лента группы: привязана к низу, как в личном чате; системные строки разрывают серии. */
 @Composable
-private fun GroupFeed(model: AppModel, msgs: List<Message>, listState: LazyListState) {
-    FeedFrame(rememberDragSelect(msgs, listState)) { GroupFeedList(model, msgs, listState) }
+private fun GroupFeed(model: AppModel, msgs: List<Message>, listState: LazyListState, fresh: MutableSet<MsgRef>) {
+    FeedFrame(rememberDragSelect(msgs, listState)) { GroupFeedList(model, msgs, listState, fresh) }
 }
 
 @Composable
-private fun GroupFeedList(model: AppModel, msgs: List<Message>, listState: LazyListState) {
+private fun GroupFeedList(model: AppModel, msgs: List<Message>, listState: LazyListState, fresh: MutableSet<MsgRef>) {
     LazyColumn(
         state = listState,
         reverseLayout = true,
@@ -248,7 +248,7 @@ private fun GroupFeedList(model: AppModel, msgs: List<Message>, listState: LazyL
             val m = msgs[i]
             val prev = msgs.getOrNull(i - 1)
             val next = msgs.getOrNull(i + 1)
-            Column {
+            FeedItem(fresh, MsgRef(m.id, m.sender)) {
                 if (prev == null || dayKey(prev.time) != dayKey(m.time)) DateChip(dayLabel(m.time))
                 // Склейка блоков. Системная строка — разделитель: у неё нет
                 // отправителя, поэтому соседние сообщения в один блок не сходятся.

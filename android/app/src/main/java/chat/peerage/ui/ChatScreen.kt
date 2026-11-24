@@ -266,7 +266,7 @@ internal fun ChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit) {
     val scope = rememberCoroutineScope()
     // Лента привязана к низу (reverseLayout): элемент 0 — самое свежее, чат с первого
     // кадра открыт на конце.
-    FollowNewest(listState, msgs)
+    val fresh = FollowNewest(listState, msgs, key)
     JumpToMessage(model, listState, msgs)
     PagingOlder(listState, key) { model.loadOlder(key, {}) }
     val chat = ChatTarget(key, group = false)
@@ -283,9 +283,6 @@ internal fun ChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit) {
     // Правка начинается с ТЕКУЩЕГО текста: человек исправляет, а не набирает заново.
     LaunchedEffect(model.editTarget) { model.editTarget?.let { input = it.text } }
     LaunchedEffect(key) { model.refreshPins(key, group = false) }
-    // Порог анимации: всё, что было в чате на момент открытия, показываем сразу.
-    // Анимировать историю при входе — мельтешение; анимируем только НОВОЕ.
-    val appearFrom = remember(key) { msgs.lastOrNull()?.id ?: Long.MIN_VALUE }
 
     // Произвольный файл (любой mime) → sendMedia (kind file/voice по mime в движке).
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -320,7 +317,7 @@ internal fun ChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit) {
         } else {
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 CompositionLocalProvider(LocalSearchMarks provides searchMarks(search)) {
-                    DmFeed(model, msgs, listState, appearFrom)
+                    DmFeed(model, msgs, listState, fresh)
                 }
                 JumpCapsule(model, listState, chat, Modifier.align(Alignment.BottomEnd))
                 FeedSeen(model, listState, msgs, chat)
@@ -382,12 +379,12 @@ internal fun ChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit) {
 
 /** Лента личного чата: привязана к низу (`reverseLayout`), элемент 0 — самое свежее. */
 @Composable
-private fun DmFeed(model: AppModel, msgs: List<Message>, listState: LazyListState, appearFrom: Long) {
-    FeedFrame(rememberDragSelect(msgs, listState)) { DmFeedList(model, msgs, listState, appearFrom) }
+private fun DmFeed(model: AppModel, msgs: List<Message>, listState: LazyListState, fresh: MutableSet<MsgRef>) {
+    FeedFrame(rememberDragSelect(msgs, listState)) { DmFeedList(model, msgs, listState, fresh) }
 }
 
 @Composable
-private fun DmFeedList(model: AppModel, msgs: List<Message>, listState: LazyListState, appearFrom: Long) {
+private fun DmFeedList(model: AppModel, msgs: List<Message>, listState: LazyListState, fresh: MutableSet<MsgRef>) {
     LazyColumn(
         state = listState,
         reverseLayout = true,
@@ -404,14 +401,14 @@ private fun DmFeedList(model: AppModel, msgs: List<Message>, listState: LazyList
             val next = msgs.getOrNull(i + 1)
             // Одна колонка на элемент: дата над пузырём должна остаться НАД ним и
             // в перевёрнутой ленте.
-            Column {
+            FeedItem(fresh, MsgRef(m.id, m.sender)) {
                 if (prev == null || dayKey(prev.time) != dayKey(m.time)) DateChip(dayLabel(m.time))
                 // Склейка блоков: в DM «отправитель» — это сторона (я/собеседник).
                 val side = { msg: Message -> if (msg.mine) "me" else "peer" }
                 val withPrev = prev != null && continuesBlock(side(prev), prev.time, side(m), m.time)
                 val withNext = next != null && continuesBlock(side(m), m.time, side(next), next.time)
                 val pos = blockPos(withPrev, withNext)
-                MessageRow(model, m, pos, animate = m.id > appearFrom, far = seriesCut(m, prev.takeIf { withPrev }, next.takeIf { withNext }))
+                MessageRow(model, m, pos, far = seriesCut(m, prev.takeIf { withPrev }, next.takeIf { withNext }))
             }
         }
         // Запрос в контакты ещё не принят (7i): сверху ленты — что сообщения ждут.
@@ -1138,7 +1135,6 @@ internal fun MessageRow(
     m: Message,
     pos: BlockPos = BlockPos.Solo,
     group: Boolean = false,
-    animate: Boolean = false,
     far: FarCut = FarCut.None,
 ) {
     // Системную строку и «Сообщение удалено» не выбирают: переслать или скопировать
@@ -1167,6 +1163,10 @@ internal fun MessageRow(
         DisposableEffect(drag, ref) { onDispose { drag.rows.remove(ref) } }
     }
     val press = remember { MutableInteractionSource() }
+    val gestures = bubbleGestures(model, m, pos, group, far)
+    // Пузырь — не весь ряд: тап и долгий тап по пустому месту сбоку от него — те же, что по
+    // пузырю (п. 18). По голому снимку тап открывает просмотрщик — меню иначе не позвать.
+    val bubbleRow = !m.system && !m.isCall && !m.deleted
     Box(
         Modifier.fillMaxWidth()
             .background(rowFill)
@@ -1174,10 +1174,10 @@ internal fun MessageRow(
                 if (drag != null && m.selectable) Modifier.onGloballyPositioned { drag.rows[ref] = it.boundsInRoot() } else Modifier,
             )
             .then(
-                if (selecting) {
-                    Modifier.toggleable(selected, press, indication = null, role = Role.Checkbox) { model.toggleSelect(m) }
-                } else {
-                    Modifier
+                when {
+                    selecting -> Modifier.toggleable(selected, press, indication = null, role = Role.Checkbox) { model.toggleSelect(m) }
+                    bubbleRow -> Modifier.combinedClickable(press, indication = null, onLongClick = gestures.onLong, onClick = gestures.onTap)
+                    else -> Modifier
                 },
             )
             .padding(horizontal = Tokens.Space.m),
@@ -1190,7 +1190,7 @@ internal fun MessageRow(
             enabled = !selecting && m.selectable,
             onReply = { model.startReply(m) },
         ) {
-            MessageRowContent(model, m, pos, group, animate, far)
+            MessageRowContent(model, m, pos, group, far, gestures)
         }
         if (checkShown > 0f) {
             Box(Modifier.graphicsLayer { alpha = checkShown }) { SelectCheck(selected) }
@@ -1262,7 +1262,7 @@ private fun SwipeToReply(modifier: Modifier, enabled: Boolean, onReply: () -> Un
 }
 
 @Composable
-private fun MessageRowContent(model: AppModel, m: Message, pos: BlockPos, group: Boolean, animate: Boolean, far: FarCut) {
+private fun MessageRowContent(model: AppModel, m: Message, pos: BlockPos, group: Boolean, far: FarCut, gestures: BubbleGestures) {
     when {
         m.system -> SystemRow(model, m)
         m.isCall -> model.currentChat?.let { CallRow(model, m, it) }
@@ -1297,8 +1297,8 @@ private fun MessageRowContent(model: AppModel, m: Message, pos: BlockPos, group:
             MessageBubble(
                 m,
                 model,
+                gestures,
                 pos,
-                animate,
                 senderName = if (pos == BlockPos.Solo || pos == BlockPos.First) who else null,
                 senderColor = nameColor(m.sender),
                 group = true,
@@ -1308,16 +1308,16 @@ private fun MessageRowContent(model: AppModel, m: Message, pos: BlockPos, group:
         }
         // Своё сообщение в группе — тоже групповое: его вложение открывается из ленты
         // группы, а не личного чата.
-        else -> MessageBubble(m, model, pos, animate, group = group, far = far)
+        else -> MessageBubble(m, model, gestures, pos, group = group, far = far)
     }
 }
 
 @Composable
-internal fun MessageBubble(
+private fun MessageBubble(
     m: Message,
     model: AppModel,
+    gestures: BubbleGestures,
     pos: BlockPos = BlockPos.Solo,
-    animate: Boolean = false,
     /** Имя автора внутри пузыря — только в группе и только на первом сообщении
      *  блока: в личном чате собеседник один и подписывать его нечем. */
     senderName: String? = null,
@@ -1340,37 +1340,13 @@ internal fun MessageBubble(
     val blobBytes = if (needsBytes) model.blob(m.blobId) else null
     val ready = m.downloaded || model.savedBlobs[m.blobId] == true
     var viewer by remember { mutableStateOf(false) }
-    // Новое сообщение всплывает снизу: видно, что оно ПРИШЛО, а не было всегда.
-    var shown by remember(m.id) { mutableStateOf(!animate) }
-    LaunchedEffect(m.id) { shown = true }
-    val appear by animateFloatAsState(
-        if (shown) 1f else 0f,
-        animationSpec = tween(Tokens.Anim.normal),
-        label = "bubble",
-    )
     val selecting = model.selection.isNotEmpty()
     // Не доставлено (выброшено из очереди или не легло в неё): красная обводка и строка
     // «Повторить» под пузырём. Только в личном чате — у групп статуса доставки нет.
     val failed = m.mine && m.status == "failed" && !group && chatId != null
-    // Где пузырь лежит в окне — для меню у него. Не состояние: прокрутка двигает пузырь
-    // каждый кадр, а читается место только в момент долгого нажатия.
-    val place = remember { BubblePlace() }
-    // Тап — меню у пузыря; долгое нажатие — выбор, и не отпуская пальца можно выбрать
-    // подряд (протяжка, как в Telegram). В режиме выбора тап переключает. Вложения зовут
-    // то же долгое нажатие: иначе палец на картинке съедал бы жест целиком.
-    val drag = LocalDragSelect.current
-    val onLong = {
-        if (m.selectable) {
-            if (drag != null) drag.start(model, m) else model.toggleSelect(m)
-        }
-    }
-    val onTap = {
-        if (selecting) {
-            model.toggleSelect(m)
-        } else if (chatId != null && m.id != 0L) {
-            model.bubbleActions = BubbleActions(m, ChatTarget(chatId, group), place.rect, shape)
-        }
-    }
+    val place = gestures.place
+    val onLong = gestures.onLong
+    val onTap = gestures.onTap
     // Мета одна на все ветки пузыря: и когда она встроена в текст, и когда лежит
     // поверх вложения — это один и тот же набор значков.
     val meta: @Composable () -> Unit = {
@@ -1379,11 +1355,7 @@ internal fun MessageBubble(
         MsgMeta(m.time, ticks, m.editedAt > 0, shownStatus(model, m, group))
     }
     Row(
-        modifier.fillMaxWidth().padding(bottom = blockGap(pos))
-            .graphicsLayer {
-                alpha = appear
-                translationY = (1f - appear) * 24f
-            },
+        modifier.fillMaxWidth().padding(bottom = blockGap(pos)),
         horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start,
     ) {
         Column(horizontalAlignment = if (m.mine) Alignment.End else Alignment.Start) {
@@ -1444,7 +1416,11 @@ internal fun MessageBubble(
                             if (m.replyTo != 0L) {
                                 // Ключ строки — пара «автор + id»: id посеян временем
                                 // отправителя и у обеих сторон может совпасть.
-                                val src = model.chat(chatId, group).firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
+                                // Поиск по всей истории чата — не на каждую перерисовку ряда (п. 19):
+                                // пересчитывается, только когда меняется сама история.
+                                val src = remember(chatId, m.replyTo, m.replySender) {
+                                    derivedStateOf { model.chat(chatId, group).firstOrNull { it.id == m.replyTo && it.sender == m.replySender } }
+                                }.value
                                 QuoteBlock(
                                     model,
                                     src,
@@ -1530,14 +1506,21 @@ internal fun MessageBubble(
                                 "file" -> FileAttachment(model, m.blobId, m.name, m.size, ready, onLongClick = onLong)
                                 // Текст обтекает мету: она едет в конец последней строки
                                 // и переносится сама, если та её не вмещает.
-                                else -> BubbleText(bubbleText(model, m).markdown().linked(m.mine).marked(LocalSearchMarks.current, m)) { meta() }
+                                else -> {
+                                    // Разбор разметки и ссылок — раз на текст, а не на каждую перерисовку
+                                    // ряда (п. 19). Имена в «@» зависят от контактов — только у таких.
+                                    val names = if (m.mentions.isEmpty()) null else model.contacts
+                                    val shown = remember(m.text, m.mentions, m.mine, names) { bubbleText(model, m).markdown().linked(m.mine) }
+                                    BubbleText(shown.marked(LocalSearchMarks.current, m)) { meta() }
+                                }
                             }
                         }
                         // Подпись к вложению — в том же пузыре, под содержимым. Она пришла
                         // ОДНИМ сообщением с файлом, поэтому и показывается как его часть.
                         if (m.kind != "text" && m.text.isNotEmpty()) {
+                            val caption = remember(m.text, m.mine) { AnnotatedString(m.text.trimEnd()).markdown().linked(m.mine) }
                             BubbleText(
-                                AnnotatedString(m.text.trimEnd()).markdown().linked(m.mine).marked(LocalSearchMarks.current, m),
+                                caption.marked(LocalSearchMarks.current, m),
                                 modifier = Modifier.padding(top = Tokens.Space.s),
                             ) { meta() }
                         }
@@ -1595,6 +1578,38 @@ private fun Modifier.markBubbleBottom() = layout { m, c ->
 }
 
 /** Место пузыря в окне; обновляется раскладкой, читается по долгому нажатию. */
+/**
+ * Жесты сообщения. Тап — меню у пузыря; долгое нажатие — выбор, и не отпуская пальца можно
+ * выбрать подряд (протяжка, как в Telegram). В режиме выбора тап переключает. Одни на пузырь,
+ * его вложения (иначе палец на картинке съедал бы жест) и пустое место ряда сбоку (п. 18).
+ */
+private class BubbleGestures(val place: BubblePlace, val onTap: () -> Unit, val onLong: () -> Unit)
+
+@Composable
+private fun bubbleGestures(model: AppModel, m: Message, pos: BlockPos, group: Boolean, far: FarCut): BubbleGestures {
+    // Где пузырь лежит в окне — для меню у него. Не состояние: прокрутка двигает пузырь
+    // каждый кадр, а читается место только в момент нажатия.
+    val place = remember { BubblePlace() }
+    val drag = LocalDragSelect.current
+    val chatId = if (group) model.currentGroup else model.currentChat
+    val shape = bubbleShape(m.mine, pos, far)
+    return BubbleGestures(
+        place,
+        onTap = {
+            if (model.selection.isNotEmpty()) {
+                model.toggleSelect(m)
+            } else if (chatId != null && m.id != 0L) {
+                model.bubbleActions = BubbleActions(m, ChatTarget(chatId, group), place.rect, shape)
+            }
+        },
+        onLong = {
+            if (m.selectable) {
+                if (drag != null) drag.start(model, m) else model.toggleSelect(m)
+            }
+        },
+    )
+}
+
 private class BubblePlace {
     var rect = androidx.compose.ui.geometry.Rect.Zero
 }
