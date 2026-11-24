@@ -266,6 +266,8 @@
     <string name="group_system_membership">Состав группы изменён · %1$s</string>
     <string name="chat_menu_search">Поиск</string>
     <string name="search_in_chat">Поиск в чате</string>
+    <string name="avatar_open">Открыть фото</string>
+    <string name="avatar_close">Закрыть фото</string>
     <string name="search_close">Закрыть поиск</string>
     <string name="search_clear">Очистить</string>
     <string name="search_refine">Уточнить</string>
@@ -1065,7 +1067,7 @@
         <item quantity="many">%d заметок удалено</item>
         <item quantity="other">%d заметки удалены</item>
     </plurals>
-    <string name="status_typing">печатает…</string>
+    <string name="status_typing_word">печатает</string>
     <string name="status_read">прочитано</string>
     <string name="act_read">Прочитано</string>
     <string name="privacy_optional">По выбору</string>

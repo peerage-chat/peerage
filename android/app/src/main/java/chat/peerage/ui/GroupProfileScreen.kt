@@ -79,7 +79,8 @@ internal fun GroupProfileScreen(
         onEdit = if (isAdmin && !g.archived) onEdit else null,
         editDesc = stringResource(R.string.group_edit_desc),
         header = {
-            SquareAvatar(g.name, size = Tokens.Size.avatarHero, avatarBytes = model.groupPhoto(gid))
+            val photo = model.groupPhoto(gid)
+            OpenableAvatar(photo, square = true) { SquareAvatar(g.name, size = Tokens.Size.avatarHero, avatarBytes = photo) }
             ShowcaseName(g.name)
             Row {
                 Text(

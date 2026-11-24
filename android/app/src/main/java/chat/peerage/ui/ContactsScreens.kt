@@ -339,14 +339,18 @@ private fun ChatListRow(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         val typing = !row.group && !row.saved && isTyping(model, row.id)
-                        Text(
-                            if (typing) stringResource(R.string.status_typing) else chatPreview(model, row),
-                            color = if (typing) Tokens.Colors.accent else Tokens.Colors.secondary,
-                            fontSize = Tokens.Font.preview,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
+                        if (typing) {
+                            TypingLabel(Tokens.Colors.accent, Tokens.Font.preview, Modifier.weight(1f))
+                        } else {
+                            Text(
+                                chatPreview(model, row),
+                                color = Tokens.Colors.secondary,
+                                fontSize = Tokens.Font.preview,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                         Spacer(Modifier.width(Tokens.Space.s))
                         ChatRowBadge(model, row)
                     }

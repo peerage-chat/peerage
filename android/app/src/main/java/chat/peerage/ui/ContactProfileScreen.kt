@@ -65,12 +65,15 @@ internal fun ContactProfileScreen(
         onEdit = { renaming = true },
         editDesc = stringResource(R.string.profile_rename),
         header = {
-            SquareAvatar(
-                c.displayName,
-                size = Tokens.Size.avatarHero,
-                avatarBytes = model.contactAvatars[c.avatarId],
-                circle = true, // собеседник — человек
-            )
+            val photo = model.contactAvatars[c.avatarId]
+            OpenableAvatar(photo) {
+                SquareAvatar(
+                    c.displayName,
+                    size = Tokens.Size.avatarHero,
+                    avatarBytes = photo,
+                    circle = true, // собеседник — человек
+                )
+            }
             ShowcaseName(c.displayName)
             Text(
                 presenceLabel(presence),

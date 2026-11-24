@@ -261,6 +261,8 @@
     <string name="chat_menu_search">Search</string>
     <string name="search_in_chat">Search in chat</string>
     <string name="search_close">Close search</string>
+    <string name="avatar_open">Open photo</string>
+    <string name="avatar_close">Close photo</string>
     <string name="search_clear">Clear</string>
     <string name="search_refine">Refine</string>
     <string name="search_from_member">From member</string>
@@ -1009,7 +1011,7 @@
         <item quantity="one">%d note deleted</item>
         <item quantity="other">%d notes deleted</item>
     </plurals>
-    <string name="status_typing">typing…</string>
+    <string name="status_typing_word">typing</string>
     <string name="status_read">read</string>
     <string name="act_read">Read</string>
     <string name="privacy_optional">Optional</string>
