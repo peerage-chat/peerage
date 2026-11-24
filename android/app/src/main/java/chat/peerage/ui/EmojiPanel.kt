@@ -7,8 +7,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -85,7 +86,8 @@ private object EmojiStore {
 }
 
 /**
- * Панель: поиск, «Недавние» и сетка группы, снизу — ряд групп и забой. Пока идёт поиск, сетка
+ * Панель: поиск, «Недавние» и сетка группы, снизу — ряд групп и забой. Группы листаются и
+ * свайпом вбок, и нажатием на ряд; ряд подсвечивает текущую. Пока идёт поиск, сетка
  * сворачивается в строку результатов: над панелью поднимается клавиатура, и вместе с сеткой
  * они не поместились бы.
  *
@@ -104,10 +106,11 @@ internal fun EmojiPanel(
     val entries by produceState(EmojiStore.entries) {
         if (value == null) value = withContext(Dispatchers.Default) { EmojiStore.load(ctx.applicationContext) }
     }
-    var category by remember { mutableStateOf(0) }
+    // Группа — страница: листаются вбок, как вкладки (п. 33); внутри страницы — прокрутка вниз.
+    val pager = rememberPagerState { Groups.size }
+    val category = pager.currentPage
     var query by remember { mutableStateOf("") }
     var searchFocused by remember { mutableStateOf(false) }
-    val gridState = rememberLazyGridState()
     val scope = rememberCoroutineScope()
     val searching = searchFocused || query.isNotBlank()
     val found = remember(entries, query) { entries?.let { EmojiIndex.search(it, query) }.orEmpty() }
@@ -148,13 +151,14 @@ internal fun EmojiPanel(
         }
 
         SectionLabel(stringResource(Groups[category].labelRes))
-        val items = remember(entries, category) { entries?.filter { it.group == category }?.map { it.emoji }.orEmpty() }
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(8),
-            state = gridState,
-            modifier = Modifier.fillMaxWidth().height(220.dp).padding(horizontal = Tokens.Space.s),
-        ) {
-            items(items) { e -> EmojiCell(e) { onPick(e) } }
+        val byGroup = remember(entries) { entries?.groupBy({ it.group }, { it.emoji }).orEmpty() }
+        HorizontalPager(pager, Modifier.fillMaxWidth().height(220.dp)) { page ->
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(8),
+                modifier = Modifier.fillMaxSize().padding(horizontal = Tokens.Space.s),
+            ) {
+                items(byGroup[page].orEmpty()) { e -> EmojiCell(e) { onPick(e) } }
+            }
         }
 
         // Группы снизу: до них дотягивается палец, и они не уезжают при прокрутке.
@@ -167,10 +171,7 @@ internal fun EmojiPanel(
                 Box(
                     Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(Tokens.Radius.chip))
                         .background(if (on) FolderSelected else Color.Transparent)
-                        .clickable {
-                            category = i
-                            scope.launch { gridState.scrollToItem(0) }
-                        },
+                        .clickable { scope.launch { pager.animateScrollToPage(i) } },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
