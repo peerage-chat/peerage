@@ -23,7 +23,7 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources \
 
 ENV DL="curl -fsSL --retry 8 --retry-all-errors --retry-delay 3"
 
-# Go — та же версия, что у разработчика (go.mod требует ≥1.24).
+# Go — та же версия, что у разработчика (go.mod требует ≥1.26: этого просит yggdrasil-go 0.5.15).
 ARG GO_VERSION=1.26.4
 ARG GO_SHA256=1153d3d50e0ac764b447adfe05c2bcf08e889d42a02e0fe0259bd47f6733ad7f
 RUN $DL -o /tmp/go.tgz https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz \

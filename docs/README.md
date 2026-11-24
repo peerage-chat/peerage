@@ -42,7 +42,7 @@ peers in `peers/public-peers.txt` go stale; current ones:
 
 ## Toolchain
 
-Rust 1.95+ · Go 1.24+ (libygg, Linux/WSL) · Android NDK r28c + cargo-ndk · Gradle 9.9 + JDK 21.
+Rust 1.95+ · Go 1.26+ (libygg, Linux/WSL) · Android NDK r28c + cargo-ndk · Gradle 9.9 + JDK 21.
 
 ## License
 
