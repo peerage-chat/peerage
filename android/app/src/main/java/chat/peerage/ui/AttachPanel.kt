@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -52,8 +53,11 @@ private val MEDIA_PERMS: Array<String> =
         arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
     }
 
-/** Прочитать последние N элементов галереи (картинки + видео) одним запросом. */
-private suspend fun loadGallery(ctx: Context, limit: Int = 120): List<GalleryItem> = withContext(Dispatchers.IO) {
+/** Страница галереи — столько снимков за раз: вся галерея в память не нужна. */
+private const val GALLERY_PAGE = 120
+
+/** Прочитать [limit] элементов галереи (картинки + видео), начиная с [from]-го от свежих. */
+private suspend fun loadGallery(ctx: Context, from: Int, limit: Int = GALLERY_PAGE): List<GalleryItem> = withContext(Dispatchers.IO) {
     val out = mutableListOf<GalleryItem>()
     val uri = MediaStore.Files.getContentUri("external")
     val cols = arrayOf(
@@ -79,6 +83,7 @@ private suspend fun loadGallery(ctx: Context, limit: Int = 120): List<GalleryIte
             val szI = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
             val tpI = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
             val duI = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DURATION)
+            if (!c.moveToPosition(from - 1) && from > 0) return@use
             while (c.moveToNext() && out.size < limit) {
                 val video = c.getInt(tpI) == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
                 out += GalleryItem(
@@ -134,7 +139,22 @@ internal fun AttachPanel(
     var granted by remember { mutableStateOf(MEDIA_PERMS.all { ctx.hasPermission(it) }) }
     var items by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
     val runWithPerm = rememberPermissionRunner()
-    LaunchedEffect(granted) { if (granted) items = loadGallery(ctx) }
+    val grid = rememberLazyGridState()
+    // Галерея страницами (п. 15 с телефона): прежде показывались только последние 120.
+    // Следующая — когда до конца загруженного осталось меньше двух экранов плиток.
+    LaunchedEffect(granted) {
+        if (!granted) return@LaunchedEffect
+        var done = false
+        snapshotFlow {
+            val last = grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            last >= items.size - GALLERY_PAGE / 4
+        }.collect { near ->
+            if (!near || done) return@collect
+            val page = loadGallery(ctx, from = items.size)
+            if (page.size < GALLERY_PAGE) done = true
+            items = items + page
+        }
+    }
     val gap = Tokens.Space.xs + Tokens.Space.xxs
 
     Column(
@@ -150,6 +170,7 @@ internal fun AttachPanel(
             if (granted) {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
+                    state = grid,
                     modifier = Modifier.fillMaxWidth().heightIn(max = Tokens.Size.attachGrid),
                     horizontalArrangement = Arrangement.spacedBy(gap),
                     verticalArrangement = Arrangement.spacedBy(gap),
