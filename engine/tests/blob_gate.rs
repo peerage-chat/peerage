@@ -376,3 +376,38 @@ fn clear_filter_from_json_rejects_what_it_cannot_read() {
     let all = ClearFilter::from_json("{}").unwrap();
     assert!(all.chats.is_empty() && all.kinds.is_empty(), "пустой — всё");
 }
+
+/// «По чатам» считает файлы, а не сообщения: одно фото, отправленное дважды, весит в чате
+/// один раз — иначе чат «весил» больше всего хранилища.
+#[test]
+fn storage_by_chat_counts_a_file_once() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(111), id(112));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let dir_a = tmpdir("a6");
+    let a = start(&net, a_id, dir_a.clone());
+    let b = start(&net, b_id, tmpdir("b6"));
+    a.add_contact(&b_key, "B");
+    b.add_contact(&a_key, "A");
+    let pic: Vec<u8> = (0..20_000u32).map(|i| ((i * 13) % 251) as u8).collect();
+    let pic_id = hex::encode(peerage_blob::blob_id(&pic));
+    b.send_media(&a_key, pic.clone(), "image/png", "p.png")
+        .unwrap();
+    b.send_media(&a_key, pic.clone(), "image/png", "p.png")
+        .unwrap();
+    assert!(
+        wait(15, || a.blob_exists(&pic_id)
+            && a.history_json(&b_key)
+                .matches("\"downloaded\":true")
+                .count()
+                == 2),
+        "оба сообщения с одним файлом у A"
+    );
+    let on_disk = std::fs::metadata(dir_a.join("blobs").join(&pic_id))
+        .unwrap()
+        .len();
+    let st: serde_json::Value = serde_json::from_str(&a.storage_stats_json()).unwrap();
+    let chat = &st["chats"][0];
+    assert_eq!(chat["files"], 1, "один файл");
+    assert_eq!(chat["bytes"], on_disk, "и его размер — один раз");
+}

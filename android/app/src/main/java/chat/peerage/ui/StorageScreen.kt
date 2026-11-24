@@ -224,17 +224,11 @@ private fun ClearSheet(model: AppModel, only: ChatTarget?, onClose: () -> Unit) 
                 }
                 chats.forEach { sc ->
                     val t = ChatTarget(sc.id, sc.group)
-                    val (name, avatar) = chatFace(model, t)
+                    val (name, _) = chatFace(model, t)
                     ClearPickRow(on = t in pickedChats, onToggle = {
                         pickedChats = if (t in pickedChats) pickedChats - t else pickedChats + t
                     }) {
-                        SquareAvatar(
-                            name,
-                            size = Tokens.Size.rowIcon,
-                            avatarBytes = avatar,
-                            circle = !sc.group,
-                            bg = if (sc.group) Tokens.Colors.groupAvatar else null,
-                        )
+                        ChatAvatar(model, t, Tokens.Size.rowIcon)
                         Spacer(Modifier.width(Tokens.Space.m))
                         Text(name, color = Color.White, fontSize = Tokens.Font.label, maxLines = 1, modifier = Modifier.weight(1f))
                         Text(
@@ -296,25 +290,23 @@ private fun ClearPickRow(on: Boolean, onToggle: () -> Unit, content: @Composable
  *  очистить вложения этого чата. */
 @Composable
 private fun StorageChatRow(model: AppModel, sc: StorageChat, divider: Boolean, onClick: () -> Unit) {
-    val (name, avatar) = chatFace(model, ChatTarget(sc.id, sc.group))
+    val t = ChatTarget(sc.id, sc.group)
+    val (name, _) = chatFace(model, t)
     CardRow(onClick = onClick, divider = divider, inset = Tokens.Space.l + Tokens.Size.rowIcon + Tokens.Space.m) {
-        SquareAvatar(
-            name,
-            size = Tokens.Size.rowIcon,
-            avatarBytes = avatar,
-            circle = !sc.group,
-            bg = if (sc.group) Tokens.Colors.groupAvatar else null,
-        )
+        ChatAvatar(model, t, Tokens.Size.rowIcon)
         Spacer(Modifier.width(Tokens.Space.m))
         Text(name, color = Color.White, fontSize = Tokens.Font.name, modifier = Modifier.weight(1f), maxLines = 1)
         Text(fmtSizeLong(sc.bytes), color = Tokens.Colors.tertiary, fontSize = Tokens.Font.option)
     }
 }
 
-/** Имя и фото чата: контакт — его имя и аватар, группа — название и фото. */
+/** Имя и фото чата: контакт — его имя и аватар, группа — название и фото, чат с собой —
+ *  «Сохранённое» (не свой ключ: экраны, что о нём забывали, показывали hex). */
 @Composable
 internal fun chatFace(model: AppModel, chat: ChatTarget): Pair<String, ByteArray?> =
-    if (chat.group) {
+    if (!chat.group && model.isSaved(chat.id)) {
+        stringResource(R.string.menu_saved) to null
+    } else if (chat.group) {
         val g = model.groups.firstOrNull { it.gid == chat.id }
         (g?.name ?: chat.id.take(12)) to model.groupPhoto(chat.id)
     } else {

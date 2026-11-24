@@ -193,7 +193,7 @@ private const val THUMB_PX = 256
 @Composable
 private fun ShareChatRow(model: AppModel, t: ChatTarget, divider: Boolean, on: Boolean, onClick: () -> Unit) {
     val saved = !t.group && model.isSaved(t.id)
-    val (name, avatar) = if (saved) stringResource(R.string.menu_saved) to null else chatFace(model, t)
+    val (name, avatar) = chatFace(model, t)
     val sub = when {
         saved -> stringResource(R.string.share_in_saved_sub)
         t.group -> {

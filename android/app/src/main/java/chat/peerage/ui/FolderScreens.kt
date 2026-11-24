@@ -295,15 +295,9 @@ internal fun TypeChip(label: String, on: Boolean, onClick: () -> Unit) {
 /** Чат в «И конкретные чаты»: аватар, имя и кружок выбора. */
 @Composable
 private fun PickRow(model: AppModel, t: ChatTarget, checked: Boolean, divider: Boolean, onToggle: () -> Unit) {
-    val (name, avatar) = chatFace(model, t)
+    val (name, _) = chatFace(model, t)
     CardRow(onClick = onToggle, divider = divider, inset = Tokens.Space.l + Tokens.Size.avatarPick + Tokens.Space.m + Tokens.Space.xxs) {
-        SquareAvatar(
-            name,
-            size = Tokens.Size.avatarPick,
-            avatarBytes = avatar,
-            circle = !t.group,
-            bg = if (t.group) Tokens.Colors.groupAvatar else null,
-        )
+        ChatAvatar(model, t)
         Spacer(Modifier.width(Tokens.Space.m + Tokens.Space.xxs))
         Text(
             name,

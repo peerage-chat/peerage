@@ -26,6 +26,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.delay
@@ -182,7 +183,7 @@ private fun ChatRow(model: AppModel, t: ChatTarget, divider: Boolean, onClick: (
 @Composable
 private fun HitRow(model: AppModel, hit: AppModel.SearchHit, words: List<String>, divider: Boolean, onClick: () -> Unit) {
     val saved = !hit.group && model.isSaved(hit.chat)
-    val (name, avatar) = if (saved) stringResource(R.string.menu_saved) to null else chatFace(model, ChatTarget(hit.chat, hit.group))
+    val (name, avatar) = chatFace(model, ChatTarget(hit.chat, hit.group))
     SearchRow(divider, onClick, avatar = { RowAvatar(name, avatar, hit.group, saved) }) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -226,20 +227,27 @@ internal fun SearchRow(
 }
 
 @Composable
-internal fun RowAvatar(name: String, bytes: ByteArray?, group: Boolean, saved: Boolean = false) {
+internal fun RowAvatar(name: String, bytes: ByteArray?, group: Boolean, saved: Boolean = false, size: Dp = Tokens.Size.avatarPick) {
     if (saved) {
-        SquareAvatar(name, size = Tokens.Size.avatarPick, bg = Tokens.Colors.accentMuted) {
+        SquareAvatar(name, size = size, bg = Tokens.Colors.accentMuted) {
             Icon(TablerIcons.Bookmark, null, tint = Tokens.Colors.accentSoft, modifier = Modifier.size(Tokens.Size.iconRow))
         }
         return
     }
     SquareAvatar(
         name,
-        size = Tokens.Size.avatarPick,
+        size = size,
         avatarBytes = bytes,
         circle = !group,
         bg = if (group) Tokens.Colors.groupAvatar else null,
     )
+}
+
+/** Аватар чата в строке по его ключу: человек — круг, группа — квадрат, «Сохранённое» — закладка. */
+@Composable
+internal fun ChatAvatar(model: AppModel, t: ChatTarget, size: Dp = Tokens.Size.avatarPick) {
+    val (name, avatar) = chatFace(model, t)
+    RowAvatar(name, avatar, t.group, saved = !t.group && model.isSaved(t.id), size = size)
 }
 
 /**

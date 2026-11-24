@@ -128,19 +128,13 @@ internal fun AutodelScreen(model: AppModel) {
             CardSection {
                 own.forEachIndexed { i, c ->
                     val chat = ChatTarget(c.chat, c.group)
-                    val (name, avatar) = chatFace(model, chat)
+                    val (name, _) = chatFace(model, chat)
                     CardRow(
                         onClick = { chatSheet = chat },
                         divider = i > 0,
                         inset = Tokens.Space.l + Tokens.Size.rowIcon + Tokens.Space.m,
                     ) {
-                        SquareAvatar(
-                            name,
-                            size = Tokens.Size.rowIcon,
-                            avatarBytes = avatar,
-                            circle = !c.group,
-                            bg = if (c.group) Tokens.Colors.groupAvatar else null,
-                        )
+                        ChatAvatar(model, chat, Tokens.Size.rowIcon)
                         Spacer(Modifier.width(Tokens.Space.m))
                         Text(name, color = Color.White, fontSize = Tokens.Font.name, modifier = Modifier.weight(1f), maxLines = 1)
                         Text(ageSegment(c.age), color = Tokens.Colors.tertiary, fontSize = Tokens.Font.option)

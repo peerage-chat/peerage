@@ -2476,6 +2476,10 @@ impl Engine {
         let mut by_kind: HashMap<String, u64> = HashMap::new();
         let mut by_chat: HashMap<(Vec<u8>, i64), (u64, u64)> = HashMap::new();
         let mut counted: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // Внутри чата — тоже по файлу, а не по сообщению: одно фото, отправленное трижды,
+        // занимает место один раз, и чат не должен «весить» больше всего хранилища.
+        let mut in_chat: std::collections::HashSet<(Vec<u8>, i64, String)> =
+            std::collections::HashSet::new();
         for a in self.messages.lock_safe().attachments() {
             let (blob_id, kind) = (a.blob_id, a.kind);
             let path = self.blob_dir.join(&blob_id);
@@ -2487,6 +2491,9 @@ impl Engine {
                 *by_kind
                     .entry(attachment_kind(&kind).to_string())
                     .or_insert(0) += len;
+            }
+            if !in_chat.insert((a.chat.clone(), a.scope, blob_id)) {
+                continue;
             }
             let e = by_chat.entry((a.chat, a.scope)).or_insert((0, 0));
             e.0 += 1;
@@ -2514,9 +2521,6 @@ impl Engine {
         serde_json::to_string(&dto).unwrap_or_else(|_| "{}".into())
     }
 
-    /// Удалить ВСЕ сохранённые вложения (явное действие пользователя). Не трогает
-    /// историю сообщений: ссылки остаются, и байты можно скачать у собеседника
-    /// заново — блобы контент-адресные. Возвращает освобождённые байты.
     /// Удалить сохранённые вложения (R-030). Остаются аватары (свой — его у нас
     /// запрашивают контакты; их — иначе пропали бы до следующей смены) и миниатюры
     /// (без них карточки пусты). Идущие докачки отменяются явно, пометки «скачано»
