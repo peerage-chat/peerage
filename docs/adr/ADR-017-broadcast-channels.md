@@ -205,14 +205,14 @@ A headless build of the same engine, run on any server or old computer:
 - **C5 (`peerage-cli`):** separate ADR, then the binary; seeds the official channel.
 - **C6:** the official channel as a default subscription.
 
-## Open questions
+## Decisions taken (2026-11-24)
 
-1. **History for a new subscriber:** the last 50 posts (proposed) or only from the moment of
-   subscribing (the 2026-10 sketch)?
-2. **Where channels appear:** a "Channels" folder in the chat list (proposed) or mixed with
-   chats?
-3. **Owner without seeders:** allow publishing from the phone alone (it then serves readers
-   and reveals its address), or require at least one seeder?
+1. **History for a new subscriber:** the last 50 posts; older ones load on scroll from
+   seeders that keep the archive.
+2. **Where channels appear:** a separate "Channels" folder in the chat list.
+3. **Owner without seeders:** publishing from the phone alone is allowed. The phone then
+   serves readers itself and its network address is visible to them; the UI says so and
+   suggests adding a seeder.
 
 ## How to check the decision is followed
 
