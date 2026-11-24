@@ -95,6 +95,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.LayoutDirection
@@ -1280,8 +1281,16 @@ private fun MessageRowContent(model: AppModel, m: Message, pos: BlockPos, group:
             val avatarBottom = pos == BlockPos.Solo || pos == BlockPos.Last
             if (avatarBottom) {
                 // Низ аватара — по низу пузыря, а не ряда: чипы реакций и «Не доставлено»
-                // под пузырём его не тянут вниз.
-                Box(Modifier.alignBy { it.measuredHeight }) {
+                // под пузырём его не тянут вниз. Высоты ряду аватар не задаёт (п. 41): он выше
+                // однострочного пузыря и раздвигал ряд вверх — последний пузырь блока отходил
+                // от предыдущего дальше прочих. Теперь он свешивается вверх, на пустое место
+                // распорок над собой, а ряд — по пузырю.
+                Box(
+                    Modifier.layout { measurable, constraints ->
+                        val p = measurable.measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
+                        layout(p.width, 0) { p.place(0, -p.height) }
+                    }.alignBy { 0 },
+                ) {
                     SquareAvatar(
                         who,
                         size = Tokens.Size.avatarHead,
