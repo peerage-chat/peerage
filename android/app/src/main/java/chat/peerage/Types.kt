@@ -169,6 +169,14 @@ data class Reaction(val emoji: String, val who: List<String>)
 /** Чат как адресат пересылки: личный (ключ собеседника) или группа (gid). */
 data class ChatTarget(val id: String, val group: Boolean, val title: String = "")
 
+/**
+ * Что чистить в «Хранилище» (п. 27): выбранные чаты и типы вложений. Пустое множество —
+ * без ограничения; оба пусты — всё, включая байты, на которые история уже не ссылается.
+ */
+data class ClearScope(val chats: Set<ChatTarget> = emptySet(), val kinds: Set<String> = emptySet()) {
+    val all: Boolean get() = chats.isEmpty() && kinds.isEmpty()
+}
+
 /** Строка «По чатам» в «Хранилище»: чат и сколько его вложений на диске. */
 data class StorageChat(val id: String, val group: Boolean, val files: Long, val bytes: Long)
 

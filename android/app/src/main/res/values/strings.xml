@@ -1205,6 +1205,11 @@
     <string name="storage_backup_last">Last: %1$s</string>
     <string name="storage_clear_title">Delete downloaded attachments?</string>
     <string name="storage_clear_sub">Messages stay. Files can be downloaded again while the sender still has them.</string>
+    <string name="storage_clear_kinds">Types</string>
+    <string name="storage_clear_chats">Chats</string>
+    <string name="storage_clear_all_chats">All chats</string>
+    <string name="storage_clear_ok_size">Clear %1$s</string>
+    <string name="storage_clear_nothing">Nothing to delete</string>
     <string name="autodel_title">Auto-delete</string>
     <string name="autodel_off">Off</string>
     <string name="autodel_sum_msgs">messages older than %1$s</string>

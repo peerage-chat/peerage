@@ -1267,6 +1267,11 @@
     <string name="storage_backup_last">Последняя — %1$s</string>
     <string name="storage_clear_title">Удалить скачанные вложения?</string>
     <string name="storage_clear_sub">Сообщения останутся. Скачать заново можно, пока файлы есть у отправителя.</string>
+    <string name="storage_clear_kinds">Типы</string>
+    <string name="storage_clear_chats">Чаты</string>
+    <string name="storage_clear_all_chats">Все чаты</string>
+    <string name="storage_clear_ok_size">Очистить %1$s</string>
+    <string name="storage_clear_nothing">Нечего удалять</string>
     <string name="autodel_title">Автоудаление</string>
     <string name="autodel_off">Выключено</string>
     <string name="autodel_sum_msgs">сообщения старше %1$s</string>

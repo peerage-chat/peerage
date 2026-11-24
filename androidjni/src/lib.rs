@@ -1546,15 +1546,34 @@ pub extern "system" fn Java_chat_peerage_Native_storageStats<'local>(
     })
 }
 
-/// Удалить все сохранённые вложения (явное действие). Возвращает освобождённые байты.
+/// Удалить сохранённые вложения под фильтром `{chats: [{chat, group}], kinds: [...]}`
+/// (пустой — всё; явное действие). Возвращает освобождённые байты; битый фильтр — 0.
 #[no_mangle]
-pub extern "system" fn Java_chat_peerage_Native_clearBlobs<'local>(
-    _env: JNIEnv<'local>,
+pub extern "system" fn Java_chat_peerage_Native_clearBlobsWhere<'local>(
+    mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_ptr: jlong,
+    filter_json: JString<'local>,
 ) -> jlong {
     jni_safe!(0, {
-        unsafe { engine(session_ptr) }.map(|e| e.clear_blobs() as jlong).unwrap_or(0)
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return 0 };
+        let Some(f) = peerage_engine::ClearFilter::from_json(&jstr(&mut env, &filter_json)) else { return 0 };
+        e.clear_blobs_where(&f) as jlong
+    })
+}
+
+/// Сколько освободит [`Java_chat_peerage_Native_clearBlobsWhere`] с тем же фильтром.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_clearBlobsPreview<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    filter_json: JString<'local>,
+) -> jlong {
+    jni_safe!(0, {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return 0 };
+        let Some(f) = peerage_engine::ClearFilter::from_json(&jstr(&mut env, &filter_json)) else { return 0 };
+        e.clear_preview(&f) as jlong
     })
 }
 

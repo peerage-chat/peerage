@@ -218,6 +218,17 @@ internal data class AutodelRuleDto(
     @SerialName("min_size") val minSize: String = "any",
 )
 
+/** Чат в фильтре очистки вложений. */
+@Serializable
+internal data class ClearChatDto(val chat: String, val group: Boolean)
+
+/** Фильтр очистки вложений (п. 27): пустой список — без ограничения. */
+@Serializable
+internal data class ClearFilterDto(
+    val chats: List<ClearChatDto> = emptyList(),
+    val kinds: List<String> = emptyList(),
+)
+
 /** Своё правило чата для сообщений. */
 @Serializable
 internal data class AutodelChatDto(

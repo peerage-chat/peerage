@@ -249,8 +249,14 @@ object Native {
     /** Что занимает место: JSON {blobs, blob_bytes, outbox_pending, outbox_bytes}. */
     external fun storageStats(sessionPtr: Long): String
 
-    /** Удалить все сохранённые вложения. Возвращает освобождённые байты. */
-    external fun clearBlobs(sessionPtr: Long): Long
+    /**
+     * Удалить сохранённые вложения под фильтром (JSON [ClearFilterDto], пустой — всё).
+     * Возвращает освобождённые байты; битый фильтр — 0, ничего не тронуто.
+     */
+    external fun clearBlobsWhere(sessionPtr: Long, filterJson: String): Long
+
+    /** Сколько освободит [clearBlobsWhere] с тем же фильтром. */
+    external fun clearBlobsPreview(sessionPtr: Long, filterJson: String): Long
 
     /** Автоудаление: правило и чаты со своим (JSON [AutodelStateDto]). */
     external fun autodelState(sessionPtr: Long): String

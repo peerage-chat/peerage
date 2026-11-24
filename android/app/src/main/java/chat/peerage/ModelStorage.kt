@@ -59,14 +59,27 @@ internal fun AppModel.setChatAutodel(chat: ChatTarget, own: String?) = ops.execu
     autodel = decodeOrNull<AutodelStateDto>(Native.autodelState(sessionPtr)) ?: autodel
 }
 
-/** Удалить сохранённые вложения. История и ссылки остаются — байты можно
+private fun ClearScope.json(): String = WireJson.encodeToString(
+    ClearFilterDto.serializer(),
+    ClearFilterDto(chats.map { ClearChatDto(it.id, it.group) }, kinds.toList()),
+)
+
+/** Сколько освободит очистка [scope]; ответ — на главном потоке. */
+internal fun AppModel.previewClear(scope: ClearScope, done: (Long) -> Unit) = ops.execute {
+    val bytes = Native.clearBlobsPreview(sessionPtr, scope.json())
+    android.os.Handler(android.os.Looper.getMainLooper()).post { done(bytes) }
+}
+
+/** Удалить сохранённые вложения под [scope]. История и ссылки остаются — байты можно
  *  скачать у собеседника заново (блобы контент-адресные). Аватары и миниатюры
- *  движок оставляет. */
-fun AppModel.clearAttachments() = ops.execute {
-    Native.clearBlobs(sessionPtr)
+ *  движок оставляет; файл, который показывает и чат вне выбора, — тоже. */
+internal fun AppModel.clearAttachments(scope: ClearScope) = ops.execute {
+    Native.clearBlobsWhere(sessionPtr, scope.json())
+    // Кэш байт — только кэш: сбросить целиком дешевле, чем выяснять, что из него ушло.
     mediaBlobs.clear()
     savedBlobs.clear()
-    downloads.clear()
+    // Докачки движок бросает лишь при полной очистке; при частичной их прогресс живой.
+    if (scope.all) downloads.clear()
     // Пометки «скачано» в открытых лентах — по факту: движок снял их в истории,
     // а уже показанные строки иначе считали бы себя скачанными до перезахода.
     for (list in messages.values) {

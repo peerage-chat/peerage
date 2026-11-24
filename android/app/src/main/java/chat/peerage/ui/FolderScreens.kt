@@ -278,9 +278,9 @@ private fun IconTile(icon: ImageVector, on: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** Чип «Личные» / «Группы» (`.tb`). */
+/** Чип-переключатель (`.tb`): «Личные» / «Группы», типы вложений в очистке. */
 @Composable
-private fun TypeChip(label: String, on: Boolean, onClick: () -> Unit) {
+internal fun TypeChip(label: String, on: Boolean, onClick: () -> Unit) {
     Box(
         Modifier.heightIn(min = Tokens.Size.typeChip).clip(RoundedCornerShape(Tokens.Radius.pill))
             .background(if (on) Tokens.Colors.accentMuted else Tokens.Colors.raised)

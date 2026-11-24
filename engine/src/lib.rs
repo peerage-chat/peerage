@@ -276,6 +276,72 @@ impl ChatKey {
     }
 }
 
+/// Что чистить на экране «Хранилище» (п. 27): чаты и типы вложений ([`attachment_kind`]).
+/// Пустой список — без ограничения; оба пусты — всё.
+#[derive(Debug, Clone, Default)]
+pub struct ClearFilter {
+    pub chats: Vec<ChatKey>,
+    pub kinds: Vec<String>,
+}
+
+impl ClearFilter {
+    /// Из JSON клиента `{chats: [{chat, group}], kinds: [...]}`. Битый чат или незнакомый
+    /// тип — `None`, а не пропуск: выброшенный элемент молча расширил бы очистку.
+    pub fn from_json(json: &str) -> Option<ClearFilter> {
+        #[derive(serde::Deserialize)]
+        struct Chat {
+            chat: String,
+            #[serde(default)]
+            group: bool,
+        }
+        #[derive(serde::Deserialize)]
+        struct Raw {
+            #[serde(default)]
+            chats: Vec<Chat>,
+            #[serde(default)]
+            kinds: Vec<String>,
+        }
+        let raw: Raw = serde_json::from_str(json).ok()?;
+        let chats = raw
+            .chats
+            .iter()
+            .map(|c| ChatKey::parse(&c.chat, c.group))
+            .collect::<Option<Vec<_>>>()?;
+        raw.kinds
+            .iter()
+            .all(|k| attachment_kind(k) == k)
+            .then_some(ClearFilter {
+                chats,
+                kinds: raw.kinds,
+            })
+    }
+
+    fn is_all(&self) -> bool {
+        self.chats.is_empty() && self.kinds.is_empty()
+    }
+
+    fn matches(&self, a: &peerage_core::store::Attachment) -> bool {
+        let chat_ok = self.chats.is_empty()
+            || self.chats.iter().any(|c| {
+                let ch = c.as_chat();
+                ch.id() == a.chat.as_slice() && ch.scope() == a.scope
+            });
+        chat_ok
+            && (self.kinds.is_empty() || self.kinds.iter().any(|k| k == attachment_kind(&a.kind)))
+    }
+}
+
+/// Вид вложения для «Хранилища»: фото, видео, голосовое, остальное — файл. Один на разбивку
+/// и на очистку: клиент чистит ровно те группы, что видит.
+pub fn attachment_kind(kind: &str) -> &'static str {
+    match kind {
+        "image" => "image",
+        "video" => "video",
+        "voice" => "voice",
+        _ => "file",
+    }
+}
+
 /// Страница «Медиа и файлы» для клиента.
 #[derive(serde::Serialize)]
 struct MediaPageJson {
@@ -2418,7 +2484,9 @@ impl Engine {
             };
             let len = meta.len();
             if counted.insert(blob_id.clone()) {
-                *by_kind.entry(kind).or_insert(0) += len;
+                *by_kind
+                    .entry(attachment_kind(&kind).to_string())
+                    .or_insert(0) += len;
             }
             let e = by_chat.entry((a.chat, a.scope)).or_insert((0, 0));
             e.0 += 1;
@@ -2454,34 +2522,96 @@ impl Engine {
     /// (без них карточки пусты). Идущие докачки отменяются явно, пометки «скачано»
     /// снимаются — карточки снова предлагают «Скачать». Возвращает освобождённые байты.
     pub fn clear_blobs(&self) -> u64 {
-        let (done_tx, done_rx) = std::sync::mpsc::channel();
-        if self.jobs.send(Job::CancelDownloads(done_tx)).is_ok() {
-            let _ = done_rx.recv_timeout(Duration::from_secs(5));
-        }
-        let wanted = self.wanted.lock_safe().all();
-        for w in wanted {
-            let _ = self.wanted.lock_safe().remove(&w.blob_id);
-        }
-        self.blob_expect.lock_safe().clear();
+        self.clear_blobs_where(&ClearFilter::default())
+    }
 
-        let mut keep = self.identity_blobs();
-        keep.extend(self.messages.lock_safe().thumb_ids());
+    /// Сколько освободит [`Self::clear_blobs_where`] с тем же фильтром — для подтверждения
+    /// на экране «Хранилище». Считает тот же набор файлов, что потом удалится.
+    pub fn clear_preview(&self, filter: &ClearFilter) -> u64 {
+        self.blobs_to_clear(filter).iter().map(|(_, len)| len).sum()
+    }
 
+    /// Удалить сохранённые вложения под фильтром (п. 27): чаты и типы, пустой фильтр — всё.
+    /// История и ссылки остаются, карточки снова предлагают «Скачать» (байты контент-адресные,
+    /// их можно взять у собеседника заново). Возвращает освобождённые байты.
+    pub fn clear_blobs_where(&self, filter: &ClearFilter) -> u64 {
+        if filter.is_all() {
+            // Всё — значит и то, что ещё качается: докачка иначе дописала бы файл обратно.
+            let (done_tx, done_rx) = std::sync::mpsc::channel();
+            if self.jobs.send(Job::CancelDownloads(done_tx)).is_ok() {
+                let _ = done_rx.recv_timeout(Duration::from_secs(5));
+            }
+            let wanted = self.wanted.lock_safe().all();
+            for w in wanted {
+                let _ = self.wanted.lock_safe().remove(&w.blob_id);
+            }
+            self.blob_expect.lock_safe().clear();
+        }
         let mut freed = 0u64;
-        if let Ok(rd) = std::fs::read_dir(&self.blob_dir) {
-            for e in rd.flatten() {
-                let Ok(meta) = e.metadata() else { continue };
-                let name = e.file_name().to_string_lossy().to_string();
-                if !meta.is_file() || keep.contains(&name) {
-                    continue;
-                }
-                if std::fs::remove_file(e.path()).is_ok() {
-                    freed += meta.len();
-                }
+        let mut gone: HashSet<String> = HashSet::new();
+        for (id, len) in self.blobs_to_clear(filter) {
+            if std::fs::remove_file(self.blob_dir.join(&id)).is_ok() {
+                freed += len;
+                gone.insert(id);
             }
         }
+        // «Скачано» снимается ровно с того, чьих байт больше нет.
+        let mut keep: HashSet<String> = self
+            .messages
+            .lock_safe()
+            .attachments()
+            .into_iter()
+            .map(|a| a.blob_id)
+            .filter(|id| !gone.contains(id) && self.blob_dir.join(id).is_file())
+            .collect();
+        keep.extend(self.identity_blobs());
         let _ = self.messages.lock_safe().reset_downloaded(&keep);
         freed
+    }
+
+    /// Файлы под фильтром и их размер на диске. Лица (аватары, фото групп) и миниатюры не
+    /// трогаются никогда. Блоб, на который ссылается и что-то ВНЕ фильтра, остаётся: файл
+    /// один на все чаты, и очистка одного чата не должна выбивать картинку из другого. Пустой
+    /// фильтр — каждый файл каталога, в том числе те, на которые история уже не ссылается.
+    fn blobs_to_clear(&self, filter: &ClearFilter) -> Vec<(String, u64)> {
+        let mut keep = self.identity_blobs();
+        let atts = {
+            let store = self.messages.lock_safe();
+            keep.extend(store.thumb_ids());
+            if filter.is_all() {
+                Vec::new()
+            } else {
+                store.attachments()
+            }
+        };
+        let candidates: Vec<String> = if filter.is_all() {
+            std::fs::read_dir(&self.blob_dir)
+                .map(|rd| {
+                    rd.flatten()
+                        .map(|e| e.file_name().to_string_lossy().to_string())
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            let (hit, held): (Vec<_>, Vec<_>) = atts.into_iter().partition(|a| filter.matches(a));
+            let held: HashSet<String> = held.into_iter().map(|a| a.blob_id).collect();
+            let mut ids: Vec<String> = hit
+                .into_iter()
+                .map(|a| a.blob_id)
+                .filter(|id| !held.contains(id))
+                .collect();
+            ids.sort();
+            ids.dedup();
+            ids
+        };
+        candidates
+            .into_iter()
+            .filter(|id| !keep.contains(id))
+            .filter_map(|id| {
+                let meta = std::fs::metadata(self.blob_dir.join(&id)).ok()?;
+                meta.is_file().then_some((id, meta.len()))
+            })
+            .collect()
     }
 
     pub fn is_online(&self, key: &[u8; 32]) -> bool {

@@ -247,3 +247,132 @@ fn clearing_attachments_keeps_avatar_and_thumbs() {
         .count();
     assert_eq!(parts, 0, "недособранных файлов не осталось");
 }
+
+/// Очистка вложений по чатам и типам (п. 27 с телефона): уходит только то, что под фильтром;
+/// блоб, который тот же файл держит и в другом чате, остаётся; предпросмотр называет ровно
+/// столько, сколько потом освободится; пустой фильтр — всё, как раньше.
+#[test]
+fn clear_by_chat_and_kind_keeps_what_others_still_show() {
+    use peerage_engine::{ChatKey, ClearFilter};
+    let net = LoopbackNet::new();
+    let (a_id, b_id, c_id) = (id(101), id(102), id(103));
+    let (a_key, b_key, c_key) = (
+        a_id.public_key_bytes(),
+        b_id.public_key_bytes(),
+        c_id.public_key_bytes(),
+    );
+    let dir_a = tmpdir("a5");
+    let a = start(&net, a_id, dir_a.clone());
+    let b = start(&net, b_id, tmpdir("b5"));
+    let c = start(&net, c_id, tmpdir("c5"));
+    a.add_contact(&b_key, "B");
+    a.add_contact(&c_key, "C");
+    b.add_contact(&a_key, "A");
+    c.add_contact(&a_key, "A");
+
+    let bytes =
+        |seed: u32| -> Vec<u8> { (0..20_000u32).map(|i| ((i * seed) % 251) as u8).collect() };
+    let blob = |v: &Vec<u8>| hex::encode(peerage_blob::blob_id(v));
+    let (shared, only_b, doc, only_c) = (bytes(3), bytes(5), bytes(7), bytes(11));
+    let (shared_id, only_b_id, doc_id, only_c_id) =
+        (blob(&shared), blob(&only_b), blob(&doc), blob(&only_c));
+    b.send_media(&a_key, shared.clone(), "image/png", "s.png")
+        .unwrap();
+    b.send_media(&a_key, only_b.clone(), "image/png", "b.png")
+        .unwrap();
+    b.send_media(&a_key, doc.clone(), "application/pdf", "d.pdf")
+        .unwrap();
+    c.send_media(&a_key, shared.clone(), "image/png", "s.png")
+        .unwrap();
+    c.send_media(&a_key, only_c.clone(), "image/png", "c.png")
+        .unwrap();
+    assert!(
+        wait(15, || [&shared_id, &only_b_id, &doc_id, &only_c_id]
+            .iter()
+            .all(|i| a.blob_exists(i))
+            && a.history_json(&c_key)
+                .matches("\"downloaded\":true")
+                .count()
+                == 2),
+        "все вложения у A"
+    );
+
+    // Картинки чата B: общая с C картинка остаётся — её показывает чат C.
+    let b_images = ClearFilter {
+        chats: vec![ChatKey::Dm(b_key)],
+        kinds: vec!["image".into()],
+    };
+    // Освобождаются байты на диске (блоб лежит запечатанным), а не длина содержимого.
+    let on_disk = |id: &str| {
+        std::fs::metadata(dir_a.join("blobs").join(id))
+            .unwrap()
+            .len()
+    };
+    let only_b_disk = on_disk(&only_b_id);
+    assert_eq!(
+        a.clear_preview(&b_images),
+        only_b_disk,
+        "предпросмотр = то, что уйдёт"
+    );
+    assert_eq!(a.clear_blobs_where(&b_images), only_b_disk);
+    assert!(!a.blob_exists(&only_b_id), "картинка только из B удалена");
+    assert!(a.blob_exists(&shared_id), "общая с C — на месте");
+    assert!(a.blob_exists(&doc_id), "файл B — другой тип, на месте");
+    assert!(a.blob_exists(&only_c_id), "чат C не трогали");
+    let downloaded = |peer: &[u8; 32], id: &str| -> bool {
+        let h: serde_json::Value = serde_json::from_str(&a.history_json(peer)).unwrap();
+        h.as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["blob_id"] == id)
+            .unwrap()["downloaded"]
+            == true
+    };
+    assert!(
+        !downloaded(&b_key, &only_b_id),
+        "удалённая снова предлагает «Скачать»"
+    );
+    assert!(
+        downloaded(&b_key, &shared_id),
+        "оставшаяся — по-прежнему скачана"
+    );
+
+    // Только тип — во всех чатах.
+    let files = ClearFilter {
+        chats: vec![],
+        kinds: vec!["file".into()],
+    };
+    let doc_disk = on_disk(&doc_id);
+    assert_eq!(a.clear_blobs_where(&files), doc_disk);
+    assert!(!a.blob_exists(&doc_id) && a.blob_exists(&shared_id));
+
+    // Пустой фильтр — всё.
+    a.clear_blobs_where(&ClearFilter::default());
+    assert!(
+        !a.blob_exists(&shared_id) && !a.blob_exists(&only_c_id),
+        "всё удалено"
+    );
+}
+
+/// Фильтр с клиента: битый чат или незнакомый тип не расширяют очистку до «всего».
+#[test]
+fn clear_filter_from_json_rejects_what_it_cannot_read() {
+    use peerage_engine::ClearFilter;
+    let key = hex::encode([7u8; 32]);
+    let f = ClearFilter::from_json(&format!(
+        r#"{{"chats":[{{"chat":"{key}"}}],"kinds":["image","file"]}}"#
+    ))
+    .unwrap();
+    assert_eq!((f.chats.len(), f.kinds.len()), (1, 2));
+    assert!(
+        ClearFilter::from_json(r#"{"chats":[{"chat":"zz"}]}"#).is_none(),
+        "битый чат"
+    );
+    assert!(
+        ClearFilter::from_json(r#"{"kinds":["document"]}"#).is_none(),
+        "незнакомый тип"
+    );
+    assert!(ClearFilter::from_json("{").is_none());
+    let all = ClearFilter::from_json("{}").unwrap();
+    assert!(all.chats.is_empty() && all.kinds.is_empty(), "пустой — всё");
+}

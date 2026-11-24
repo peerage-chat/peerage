@@ -742,14 +742,18 @@ internal fun PlateButton(
     modifier: Modifier = Modifier,
     danger: Boolean = false,
     primary: Boolean = false,
+    /** Неактивная — плашкой с приглушённым текстом, нажатие не доходит. */
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     val fg = when {
+        !enabled -> Tokens.Colors.tertiary
         primary -> Tokens.Colors.accentDark
         danger -> Tokens.Colors.iconDangerMuted
         else -> Color.White
     }
     val bg = when {
+        !enabled -> Tokens.Colors.raised
         primary -> Tokens.Colors.accent
         danger -> Tokens.Colors.dangerPlate
         else -> Tokens.Colors.raised
@@ -760,7 +764,7 @@ internal fun PlateButton(
             .heightIn(min = Tokens.Size.touch)
             .clip(RoundedCornerShape(Tokens.Radius.button))
             .background(bg)
-            .clickable(interactionSource = press, indication = null, role = Role.Button) { onClick() }
+            .clickable(interactionSource = press, indication = null, enabled = enabled, role = Role.Button) { onClick() }
             .padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.s),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s, Alignment.CenterHorizontally),
