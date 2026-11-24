@@ -122,7 +122,7 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
     val key = model.currentChat
     val c = key?.let { k -> model.contacts.firstOrNull { it.key == k } }
     val name = c?.displayName ?: stringResource(R.string.chat_default_title)
-    val online = key?.let { model.online[it] == true } ?: false
+    val presence = key?.let { model.presence(it) } ?: Presence.Offline
     val avatar = c?.avatarId?.let { model.contactAvatars[it] }
     Row(
         Modifier.fillMaxWidth().background(HoloBg).height(Tokens.Size.topBar).padding(horizontal = Tokens.Space.s),
@@ -137,7 +137,7 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
             SquareAvatar(
                 name,
                 size = Tokens.Size.avatarHead,
-                online = online,
+                presence = presence,
                 avatarBytes = avatar,
                 circle = true, // собеседник — человек
                 ring = HoloBg,
@@ -165,8 +165,8 @@ internal fun ChatTopBar(model: AppModel, onBack: () -> Unit, onProfile: () -> Un
                     Text(stringResource(R.string.chat_request_sent), color = HoloSecondary, fontSize = Tokens.Font.caption)
                 } else {
                     Text(
-                        stringResource(if (online) R.string.status_in_network else R.string.status_offline),
-                        color = if (online) HoloOnline else HoloSecondary,
+                        presenceLabel(presence),
+                        color = if (presence == Presence.Offline) HoloSecondary else presenceDot(presence),
                         fontSize = Tokens.Font.caption,
                     )
                 }

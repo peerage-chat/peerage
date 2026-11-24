@@ -69,7 +69,8 @@ object Tokens {
         val onOnline = Color(0xFF0A1F0A) // текст на зелёном (мини-аватар)
 
         // ── Статусы ───────────────────────────────────────────────────────────
-        val online = Color(0xFF8BC34A)
+        val online = Color(0xFF8BC34A) // «в сети»: приложение открыто
+        val reachable = Color(0xFFE2C541) // «на связи»: узел отвечает, приложение свёрнуто
         val verified = Color(0xFF4CAF50)
         val verifiedTile = Color(0xFF1E3A24) // плитка «Ключ сверен» в профиле (`prof/`)
         val warnTile = Color(0xFF3A3020) // плитка «Ключ не сверен» — тот же тон, что warn, приглушённый

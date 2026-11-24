@@ -56,7 +56,7 @@ private data class ChatRowUi(
     val group: Boolean,
     val title: String,
     val avatar: ByteArray? = null,
-    val online: Boolean = false,
+    val presence: Presence = Presence.Offline,
     val verified: Boolean = false,
     val unread: Int = 0,
     /** В непрочитанном меня упомянули (только группы). */
@@ -144,7 +144,7 @@ internal fun ContactsScreen(
                     ChatRowUi(
                         id = c.key, group = false, title = c.displayName,
                         avatar = model.contactAvatars[c.avatarId],
-                        online = model.online[c.key] == true, verified = c.verified,
+                        presence = model.presence(c.key), verified = c.verified,
                         unread = model.unread[c.key] ?: 0,
                         muted = model.chatQuiet(c.key, false), pinnedAt = s?.pinnedAt ?: 0, summary = s,
                     ),
@@ -285,7 +285,7 @@ private fun ChatListRow(
                     SquareAvatar(
                         row.title,
                         size = Tokens.Size.avatarRow,
-                        online = if (row.group) null else row.online,
+                        presence = if (row.group) null else row.presence,
                         avatarBytes = row.avatar,
                         circle = !row.group, // человек — круг, сущность — скруглённый квадрат
                         ring = bg,
@@ -867,7 +867,7 @@ private fun LetterHeader(letter: String) {
 /** Строка контакта прямо на панели: аватар со статусом, имя, «в сети», щит у сверенного. */
 @Composable
 private fun ContactRow(model: AppModel, c: Contact, divider: Boolean, onClick: () -> Unit) {
-    val online = model.online[c.key] == true
+    val presence = model.presence(c.key)
     Column {
         if (divider) {
             HorizontalDivider(thickness = 1.dp, color = Tokens.Colors.divider, modifier = Modifier.padding(start = ContactRowInset))
@@ -882,8 +882,8 @@ private fun ContactRow(model: AppModel, c: Contact, divider: Boolean, onClick: (
             SquareAvatar(
                 c.displayName,
                 size = Tokens.Size.avatarContact,
-                // Точка только «в сети» (макет): «не в сети» и так написано строкой ниже.
-                online = online.takeIf { it },
+                // Точка только при связи (макет): «не в сети» и так написано строкой ниже.
+                presence = presence.takeIf { it != Presence.Offline },
                 avatarBytes = model.contactAvatars[c.avatarId],
                 circle = true,
                 ring = Tokens.Colors.panel,
@@ -897,11 +897,7 @@ private fun ContactRow(model: AppModel, c: Contact, divider: Boolean, onClick: (
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    stringResource(if (online) R.string.status_online else R.string.status_offline),
-                    color = if (online) HoloOnline else Tokens.Colors.tertiary,
-                    fontSize = Tokens.Font.body,
-                )
+                Text(presenceLabel(presence), color = presenceText(presence), fontSize = Tokens.Font.body)
             }
             if (c.verified) {
                 Icon(
@@ -957,13 +953,13 @@ private fun RequestsStrip(requests: List<ContactRequest>, onOpen: () -> Unit) {
  */
 @Composable
 internal fun LazyItemScope.ContactCardRow(model: AppModel, c: Contact, first: Boolean, last: Boolean, onClick: () -> Unit) {
-    val online = model.online[c.key] == true
+    val presence = model.presence(c.key)
     CardBlock(first, last) {
         CardRow(onClick = onClick, divider = !first, inset = AvatarRowInset) {
             SquareAvatar(
                 c.displayName,
                 size = Tokens.Size.avatarRow,
-                online = online,
+                presence = presence,
                 avatarBytes = model.contactAvatars[c.avatarId],
                 circle = true,
                 ring = Tokens.Colors.surface,
@@ -985,11 +981,7 @@ internal fun LazyItemScope.ContactCardRow(model: AppModel, c: Contact, first: Bo
                         Icon(Icons.Filled.Verified, null, tint = HoloVerified, modifier = Modifier.size(Tokens.Size.iconXs))
                     }
                 }
-                Text(
-                    stringResource(if (online) R.string.status_online else R.string.status_offline),
-                    color = if (online) HoloOnline else Tokens.Colors.tertiary,
-                    fontSize = Tokens.Font.small,
-                )
+                Text(presenceLabel(presence), color = presenceText(presence), fontSize = Tokens.Font.small)
             }
         }
     }

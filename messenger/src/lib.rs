@@ -109,8 +109,10 @@ impl Transport for Node {
 /// События, доставляемые приложению из фоновых потоков.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    /// Изменение онлайн-статуса пира (первый контакт — `online: true`).
-    Presence { peer: PeerKey, online: bool },
+    /// Изменение статуса пира: `online` — «на связи» (узел отвечает), `active` — «в сети»
+    /// (у него открыто приложение; приходит только от своих и только если он это не скрыл).
+    /// Без связи `active` всегда false. Первый контакт — `online: true`.
+    Presence { peer: PeerKey, online: bool, active: bool },
     /// Входящее текстовое сообщение. `reply_to` = 0 — обычное; иначе это ответ на
     /// сообщение с таким id, а `reply_mine` уже ПЕРЕВЁРНУТ под нашу сторону
     /// (true = отвечают на наше сообщение).
@@ -330,6 +332,8 @@ pub enum MessengerError {
 
 struct PeerState {
     online: bool,
+    /// Приложение у пира открыто (флаг из его Ping/Pong); сбрасывается с уходом связи.
+    active: bool,
     last_seen: Instant,
     last_ping: Instant,
     /// Следующая проба офлайн-пира и текущий шаг backoff (растёт до [`PROBE_MAX`]).
@@ -339,7 +343,7 @@ struct PeerState {
 
 impl PeerState {
     fn new(now: Instant) -> Self {
-        PeerState { online: false, last_seen: now, last_ping: now, next_probe: now, backoff: PROBE_MIN }
+        PeerState { online: false, active: false, last_seen: now, last_ping: now, next_probe: now, backoff: PROBE_MIN }
     }
 }
 
@@ -411,6 +415,9 @@ struct Shared {
     send_order: Mutex<()>,
     next_id: AtomicU64,
     running: AtomicBool,
+    /// Приложение открыто на экране и человек это не скрыл (`Messenger::set_active`):
+    /// уходит своим флагом `active` в Ping/Pong.
+    active: AtomicBool,
     tx: Sender<Event>,
     media_tx: Mutex<Option<SyncSender<MediaPacket>>>,
     /// Бюджет пиров (M3): тир доверия + счётчик заслуг. Кого тут нет, тот
@@ -590,7 +597,14 @@ impl Shared {
     /// Проба присутствия: без сессии само рукопожатие и есть проба (ответ на него
     /// — признак жизни), держать Ping до его конца незачем.
     fn probe(&self, peer: &PeerKey) {
-        let _ = self.send_with(peer, &Payload::Ping { transit: None }, false);
+        let active = self.active_for(peer);
+        let _ = self.send_with(peer, &Payload::Ping { transit: None, active }, false);
+    }
+
+    /// Говорить ли пиру, что приложение открыто: только своим (контактам) — иначе
+    /// любой, кто знает адрес, видел бы, когда человек смотрит в телефон.
+    fn active_for(&self, peer: &PeerKey) -> bool {
+        self.active.load(Ordering::Relaxed) && self.targets.lock().unwrap().contains(peer)
     }
 
     /// Отправка того, что лежит в `pending`: без сессии — только начать
@@ -879,8 +893,33 @@ impl Shared {
     /// От пира пришёл подлинный трафик: он онлайн. Вернулся — досылаем накопленное.
     fn peer_alive(&self, peer: &PeerKey) {
         if self.mark_seen(peer) {
-            self.emit(Event::Presence { peer: *peer, online: true });
+            self.emit(Event::Presence { peer: *peer, online: true, active: false });
+            // Мы «в сети», а он только что вернулся: скажем сразу, а не через keepalive.
+            if self.active_for(peer) {
+                self.probe(peer);
+            }
             self.pump(peer);
+        }
+    }
+
+    /// Пир сообщил в Ping/Pong, открыто ли у него приложение. Верим только своим:
+    /// чужому незачем и показывать это негде.
+    fn peer_active(&self, peer: &PeerKey, active: bool) {
+        if !self.targets.lock().unwrap().contains(peer) {
+            return;
+        }
+        let changed = {
+            let mut peers = self.peers.lock().unwrap();
+            match peers.get_mut(peer) {
+                Some(st) if st.online && st.active != active => {
+                    st.active = active;
+                    true
+                }
+                _ => false,
+            }
+        };
+        if changed {
+            self.emit(Event::Presence { peer: *peer, online: true, active });
         }
     }
 
@@ -952,6 +991,7 @@ impl Messenger {
                 SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(1),
             ),
             running: AtomicBool::new(true),
+            active: AtomicBool::new(false),
             tx,
             media_tx: Mutex::new(None),
             tiers: Mutex::new(std::collections::HashMap::new()),
@@ -1045,6 +1085,23 @@ impl Messenger {
     /// группы), тот перестаёт получать от нас что-либо служебное сразу.
     pub fn set_targets(&self, targets: std::collections::HashSet<PeerKey>) {
         *self.shared.targets.lock().unwrap() = targets;
+    }
+
+    /// Открыто ли приложение на экране (и не скрыто ли это человеком). Сменилось —
+    /// тут же говорим всем своим, кто на связи: ждать следующего keepalive (до 15 с)
+    /// значило бы показывать «в сети» тому, кто уже убрал телефон.
+    pub fn set_active(&self, on: bool) {
+        if self.shared.active.swap(on, Ordering::Relaxed) == on {
+            return;
+        }
+        let online: Vec<PeerKey> = {
+            let targets = self.shared.targets.lock().unwrap().clone();
+            let peers = self.shared.peers.lock().unwrap();
+            targets.iter().filter(|k| peers.get(*k).is_some_and(|s| s.online)).copied().collect()
+        };
+        for peer in &online {
+            self.shared.probe(peer);
+        }
     }
 
     /// Попробовать достучаться до пира прямо сейчас (пользователь открыл чат,
@@ -1971,17 +2028,19 @@ fn receive_loop(shared: Arc<Shared>) {
                     }
                 }
             }
-            Payload::Ping { .. } => {
+            Payload::Ping { active, .. } => {
                 // ADR-008: заявка о транзите (`transit`) в 1.0 не читается — её нечем
                 // проверить, а непроверенной заявке цена ноль.
                 // Отвечаем только своим: Pong кому угодно — готовый оракул «онлайн
                 // ли этот ключ» для любого, кто знает наш адрес.
                 let ours = shared.targets.lock().unwrap().contains(&peer_id);
                 if ours {
-                    let _ = shared.send(&peer_id, &Payload::Pong { transit: None });
+                    shared.peer_active(&peer_id, active);
+                    let pong = Payload::Pong { transit: None, active: shared.active_for(&peer_id) };
+                    let _ = shared.send(&peer_id, &pong);
                 }
             }
-            Payload::Pong { .. } => {}
+            Payload::Pong { active, .. } => shared.peer_active(&peer_id, active),
             Payload::RoomInvite { id, room_id, audio, video } => {
                 shared.emit(Event::RoomInvite { peer: peer_id, room_id, audio, video });
                 let _ = shared.send(&peer_id, &Payload::Ack { id }); // гасим ретрай инвайта
@@ -2082,6 +2141,7 @@ fn maintenance_loop(shared: Arc<Shared>) {
             for (key, st) in peers.iter_mut() {
                 if st.online && now.duration_since(st.last_seen) > shared.cfg.offline_after {
                     st.online = false;
+                    st.active = false;
                     st.backoff = PROBE_MIN;
                     st.next_probe = now;
                     went_offline.push(*key);
@@ -2108,7 +2168,7 @@ fn maintenance_loop(shared: Arc<Shared>) {
             peers.retain(|k, st| st.online || targets.contains(k));
         }
         for key in went_offline {
-            shared.emit(Event::Presence { peer: key, online: false });
+            shared.emit(Event::Presence { peer: key, online: false, active: false });
         }
         for key in &to_ping {
             shared.probe(key);
@@ -2340,8 +2400,56 @@ mod tests {
         assert!(seen.is_none(), "по одному адресу A не ответил");
 
         b.poke(&a_key);
-        let seen = wait_for(&b_rx, |e| matches!(e, Event::Presence { peer, online: true } if *peer == a_key));
+        let seen = wait_for(&b_rx, |e| matches!(e, Event::Presence { peer, online: true, .. } if *peer == a_key));
         assert!(seen.is_some(), "знающему личность — рукопожатие");
+    }
+
+    /// П. 9: «в сети» (приложение открыто) доходит до своего сразу, без ожидания
+    /// keepalive, и так же сразу гаснет; чужому, который сам нас в набор не взял,
+    /// флаг не уходит, а без связи «в сети» не бывает.
+    #[test]
+    fn active_flag_reaches_contacts_only() {
+        let net = LoopbackNet::new();
+        let (a_id, b_id, c_id) = (id(51), id(52), id(53));
+        let (a_key, b_key, c_key) = (a_id.public_key_bytes(), b_id.public_key_bytes(), c_id.public_key_bytes());
+        let (a, a_rx) = Messenger::start_with_transport(a_id, net.endpoint(a_key), Config::default());
+        let (b, b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), Config::default());
+        let (c, c_rx) = Messenger::start_with_transport(c_id, net.endpoint(c_key), Config::default());
+        a.set_targets([b_key].into_iter().collect());
+        b.set_targets([a_key].into_iter().collect());
+        c.set_targets([b_key].into_iter().collect()); // C считает B своим, B его — нет
+        a.poke(&b_key);
+        c.poke(&b_key);
+        let on = |rx: &Receiver<Event>, want: bool| {
+            wait_for(rx, |e| matches!(e, Event::Presence { peer, online: true, active } if *peer == b_key && *active == want))
+        };
+        assert!(on(&a_rx, false).is_some(), "сначала только «на связи»");
+        let a_seen = wait_for(&b_rx, |e| matches!(e, Event::Presence { peer, online: true, .. } if *peer == a_key));
+        assert!(a_seen.is_some(), "B видит A");
+
+        b.set_active(true);
+        assert!(on(&a_rx, true).is_some(), "открыл приложение — своему «в сети»");
+        assert!(on(&c_rx, true).is_none(), "чужому — нет");
+
+        b.set_active(false);
+        assert!(on(&a_rx, false).is_some(), "убрал — гаснет сразу");
+    }
+
+    /// Кто «в сети» уже до встречи, говорит об этом вернувшемуся своему сразу, а не
+    /// через keepalive: первая проба без сессии — только рукопожатие, флаг в ней не едет.
+    #[test]
+    fn active_flag_is_told_on_reconnect() {
+        let net = LoopbackNet::new();
+        let (a_id, b_id) = (id(54), id(55));
+        let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+        let (a, a_rx) = Messenger::start_with_transport(a_id, net.endpoint(a_key), Config::default());
+        let (b, _b_rx) = Messenger::start_with_transport(b_id, net.endpoint(b_key), Config::default());
+        a.set_targets([b_key].into_iter().collect());
+        b.set_targets([a_key].into_iter().collect());
+        b.set_active(true);
+        a.poke(&b_key);
+        let seen = wait_for(&a_rx, |e| matches!(e, Event::Presence { peer, active: true, .. } if *peer == b_key));
+        assert!(seen.is_some());
     }
 
     /// R-022: офлайн-пира из набора пробуем с растущей паузой, а не непрерывно.

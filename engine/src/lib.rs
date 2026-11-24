@@ -4193,7 +4193,11 @@ fn handle_event(
     ev: Event,
 ) {
     match ev {
-        Event::Presence { peer, online } => {
+        Event::Presence {
+            peer,
+            online,
+            active,
+        } => {
             if online {
                 // Профиль — ТОЛЬКО контактам (не светим профиль незнакомцам,
                 // presence сам по себе больше не добавляет в контакты — нужен явный запрос).
@@ -4215,6 +4219,7 @@ fn handle_event(
                 dto::UiEvent::Presence {
                     peer: hex::encode(peer),
                     online,
+                    active: engine.shown_active(&peer, active),
                 },
             );
             // ADR-007: контакт вернулся, а объявление о смене нашего адреса до него

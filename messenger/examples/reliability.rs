@@ -113,7 +113,7 @@ fn main() {
     assert!(
         wait_for(
             &rx_a,
-            |e| matches!(e, Event::Presence { peer, online: false } if *peer == pk_b),
+            |e| matches!(e, Event::Presence { peer, online: false, .. } if *peer == pk_b),
             Duration::from_secs(8),
         ),
         "A должен заметить, что B офлайн"

@@ -128,6 +128,11 @@ internal fun SettingsPrivacyScreen(model: AppModel, onBlocked: () -> Unit) {
                 stringResource(if (p.typing) R.string.privacy_typing_on else R.string.privacy_typing_off),
                 p.typing,
             ) { model.setTypingIndicator(it) }
+            PrivacySwitch(
+                stringResource(R.string.privacy_in_app),
+                stringResource(if (p.inApp) R.string.privacy_in_app_on else R.string.privacy_in_app_off),
+                p.inApp,
+            ) { model.setInAppStatus(it) }
         }
         SectionTitle(stringResource(R.string.privacy_not_sent))
         CardSection {

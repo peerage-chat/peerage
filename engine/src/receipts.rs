@@ -11,6 +11,11 @@
 //!
 //! Оба пакета — без id и Ack (бакет CONTROL, M5): потерянную отметку перекроет
 //! следующая, а пропавший набор не стоит ретрая.
+//!
+//! **«В сети»** (п. 9 списка с телефона) — тоже здесь: приложение открыто на экране.
+//! В отличие от отчётов включено по умолчанию — это основа статуса, а не отдельная
+//! функция; скрыть можно, и тоже взаимно: скрывший не видит «в сети» у других, только
+//! «на связи». Едет флагом в keepalive (Ping/Pong), своего пакета нет.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -26,12 +31,29 @@ use crate::{dto, gate_of, push_event, Engine, Gate, LockRecover};
 const TYPING_EVERY: Duration = Duration::from_secs(3);
 
 /// Переключатели «Профиль → Приватность». Не секрет; `privacy.json` в каталоге данных.
-#[derive(Serialize, Deserialize, Default, Clone, Copy)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct Privacy {
     #[serde(default)]
     pub read_receipts: bool,
     #[serde(default)]
     pub typing: bool,
+    /// Показывать своим, что приложение открыто («в сети»). Нет в файле — включено.
+    #[serde(default = "yes")]
+    pub in_app: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for Privacy {
+    fn default() -> Self {
+        Privacy {
+            read_receipts: false,
+            typing: false,
+            in_app: true,
+        }
+    }
 }
 
 /// Состояние отчётов: переключатели и что уже отправлено.
@@ -43,6 +65,8 @@ pub(crate) struct Receipts {
     /// Последняя отметка «прочитано до» каждому — досылается, когда он вернётся в
     /// сеть: отметка без Ack, и прочитанное при нём офлайн иначе пропало бы.
     read_marks: HashMap<[u8; 32], u64>,
+    /// Приложение на переднем плане (клиент сообщает с каждой сменой). В файл не идёт.
+    foreground: bool,
 }
 
 impl Receipts {
@@ -57,6 +81,7 @@ impl Receipts {
             prefs,
             typing_sent: HashMap::new(),
             read_marks: HashMap::new(),
+            foreground: false,
         }
     }
 
@@ -68,7 +93,7 @@ impl Receipts {
 }
 
 impl Engine {
-    /// Переключатели приватности: `{"read_receipts":bool,"typing":bool}`.
+    /// Переключатели приватности: `{"read_receipts":bool,"typing":bool,"in_app":bool}`.
     pub fn privacy_json(&self) -> String {
         serde_json::to_string(&self.receipts.lock_safe().prefs).unwrap_or_default()
     }
@@ -88,6 +113,36 @@ impl Engine {
         let mut r = self.receipts.lock_safe();
         r.prefs.typing = on;
         r.save();
+    }
+
+    /// Приложение вышло на экран или ушло с него. Своим это уходит флагом «в сети»,
+    /// если человек его не скрыл.
+    pub fn set_app_foreground(&self, on: bool) {
+        let shown = {
+            let mut r = self.receipts.lock_safe();
+            r.foreground = on;
+            on && r.prefs.in_app
+        };
+        self.messenger.set_active(shown);
+    }
+
+    /// «В сети» для своих: показывать или скрыть (взаимно — скрывший видит только
+    /// «на связи»).
+    pub fn set_in_app_status(&self, on: bool) {
+        let shown = {
+            let mut r = self.receipts.lock_safe();
+            r.prefs.in_app = on;
+            r.save();
+            r.foreground && on
+        };
+        self.messenger.set_active(shown);
+    }
+
+    /// Что из флага «в сети» показать: только контакту и только если своё не скрыто.
+    pub(crate) fn shown_active(&self, peer: &[u8; 32], active: bool) -> bool {
+        active
+            && self.receipts.lock_safe().prefs.in_app
+            && matches!(gate_of(self, peer), Gate::Contact)
     }
 
     /// Личный чат прочитан до последнего входящего: отправить отметку, если отчёты

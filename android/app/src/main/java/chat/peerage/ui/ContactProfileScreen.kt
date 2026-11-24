@@ -41,7 +41,7 @@ internal fun ContactProfileScreen(
     val key = model.currentChat ?: return
     val c = model.contacts.firstOrNull { it.key == key } ?: return
     val ctx = LocalContext.current
-    val online = model.online[key] == true
+    val presence = model.presence(key)
     var renaming by remember(key) { mutableStateOf(false) }
     var confirm by remember(key) { mutableStateOf<ProfileDanger?>(null) }
     var commonOpen by remember(key) { mutableStateOf(false) }
@@ -73,8 +73,8 @@ internal fun ContactProfileScreen(
             )
             ShowcaseName(c.displayName)
             Text(
-                stringResource(if (online) R.string.status_in_network else R.string.status_offline),
-                color = if (online) Tokens.Colors.online else Tokens.Colors.tertiary,
+                presenceLabel(presence),
+                color = presenceText(presence),
                 fontSize = Tokens.Font.body,
             )
             // Ключ — сокращённо и моноширинно; нажатие копирует целиком. Сверяют не по

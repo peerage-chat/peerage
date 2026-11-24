@@ -24,6 +24,11 @@ a side effect of delivery:
 `docs/design/app-ui.md` records the same: «Статус „в сети“ контакты видят всегда — он
 следует из доставки (keepalive), отдельной настройки нет».
 
+*Update 2026-11-24 (beta item 9):* that status is now called «на связи» (reachable). A
+separate «в сети» (app open on screen) rides as an `active` flag in the same Ping/Pong,
+contacts only, on by default, hideable and mutual (`privacy.json` `in_app`). Hiding it
+does not affect delivery; the switch for «на связи» itself still waits for mailboxes.
+
 **The owner's requirement:** every beacon is optional and has its own switch. Hidden
 profiles (ADR-015 §5) send none at all.
 

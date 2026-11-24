@@ -343,6 +343,16 @@ class AppModel private constructor() {
     /** «Заблокированные» (5.2), новые сверху. */
     val blocked = mutableStateListOf<BlockedPeer>()
     val online = mutableStateMapOf<String, Boolean>()
+
+    /** У контакта открыто приложение (п. 9, «в сети»); без связи не бывает. */
+    val inApp = mutableStateMapOf<String, Boolean>()
+
+    /** Статус контакта для точки и подписи: «в сети» → «на связи» → «не в сети». */
+    fun presence(key: String): Presence = when {
+        online[key] != true -> Presence.Offline
+        inApp[key] == true -> Presence.InApp
+        else -> Presence.Reachable
+    }
     val unread = mutableStateMapOf<String, Int>()
 
     /**
@@ -1299,6 +1309,8 @@ class AppModel private constructor() {
     @Volatile var foreground = true
         set(v) {
             field = v
+            // Своим — «в сети» или уже нет (если человек это не скрыл; решает движок).
+            ops.execute { Native.setAppForeground(sessionPtr, v) }
             // Вернулись к ленте чата — она снова на экране, значит прочитана, и шторка о нём не нужна.
             if (v) {
                 viewing?.let { c ->
@@ -1459,6 +1471,7 @@ class AppModel private constructor() {
         selfAvatar = Native.selfAvatar(sessionPtr) // M2: свой аватар (уже на этом потоке)
         selfName = Native.selfName(sessionPtr) // M2: своё имя из движка
         privacy = decodeOrNull<PrivacyDto>(Native.privacy(sessionPtr)) ?: PrivacyDto()
+        Native.setAppForeground(sessionPtr, foreground) // смены до старта сессии движок не видел
         contactCode = Native.myContactCode(sessionPtr)
         // Расшифрованные копии вложений, оставшиеся от прошлого запуска (просмотр,
         // «открыть», «поделиться»): держать их дольше нужного незачем.
@@ -2461,6 +2474,7 @@ class AppModel private constructor() {
         when (ev) {
             is EngineEvent.Presence -> {
                 online[ev.peer] = ev.online
+                inApp[ev.peer] = ev.online && ev.active
                 if (contacts.none { it.key == ev.peer }) refreshContactsNow()
             }
             is EngineEvent.MessageEv -> {
@@ -2749,6 +2763,13 @@ class AppModel private constructor() {
     fun setReadReceipts(on: Boolean) = ops.execute {
         Native.setReadReceipts(sessionPtr, on)
         privacy = privacy.copy(readReceipts = on)
+    }
+
+    fun setInAppStatus(on: Boolean) = ops.execute {
+        Native.setInAppStatus(sessionPtr, on)
+        privacy = privacy.copy(inApp = on)
+        // Взаимно: скрывший чужого «в сети» не видит. Включил — придёт с ближайшим keepalive.
+        if (!on) inApp.clear()
     }
 
     fun setTypingIndicator(on: Boolean) = ops.execute {

@@ -170,7 +170,7 @@ private fun ChatRow(model: AppModel, t: ChatTarget, divider: Boolean, onClick: (
         val n = model.groups.firstOrNull { it.gid == t.id }?.members ?: 0
         pluralStringResource(R.plurals.search_group_subtitle, n, n)
     } else {
-        stringResource(if (model.online[t.id] == true) R.string.status_online else R.string.status_offline)
+        presenceLabel(model.presence(t.id))
     }
     SearchRow(divider, onClick, avatar = { RowAvatar(name, avatar, t.group) }) {
         Text(name, color = Color.White, fontSize = Tokens.Font.label, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)

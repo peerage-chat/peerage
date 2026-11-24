@@ -153,9 +153,12 @@ pub struct CallEntry {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UiEvent {
+    /// `online` — «на связи» (узел отвечает), `active` — «в сети» (у контакта открыто
+    /// приложение; false, если он это скрыл или скрыли мы).
     Presence {
         peer: String,
         online: bool,
+        active: bool,
     },
     /// Новая строка переписки — личной или групповой, своей или входящей. Едет
     /// ровно та строка, что легла в историю (подпись, «переслано», ответ, номер
@@ -313,10 +316,11 @@ mod tests {
         let ev = UiEvent::Presence {
             peer: "aa".into(),
             online: true,
+            active: false,
         };
         assert_eq!(
             ev.to_json(),
-            r#"{"type":"presence","peer":"aa","online":true}"#
+            r#"{"type":"presence","peer":"aa","online":true,"active":false}"#
         );
 
         let ev = UiEvent::Ack {

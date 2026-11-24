@@ -127,6 +127,7 @@
     <string name="status_online">онлайн</string>
     <string name="status_offline">не в сети</string>
     <string name="status_in_network">в сети</string>
+    <string name="status_reachable">на связи</string>
     <plurals name="group_presence">
         <item quantity="one">%1$d участник · %2$d в сети</item>
         <item quantity="few">%1$d участника · %2$d в сети</item>
@@ -1074,11 +1075,14 @@
     <string name="privacy_typing">Индикатор набора</string>
     <string name="privacy_typing_off">Выключен — чужой набор тоже не виден</string>
     <string name="privacy_typing_on">Включён — работает с теми, у кого тоже включён</string>
+    <string name="privacy_in_app">Статус «в сети»</string>
+    <string name="privacy_in_app_on">Включён — контакты видят, когда приложение открыто</string>
+    <string name="privacy_in_app_off">Выключен — чужой «в сети» тоже не виден</string>
     <string name="privacy_not_sent">Не отправляется</string>
     <string name="privacy_not_sent_what">Номер телефона, почта, список контактов</string>
     <string name="privacy_not_sent_sub">Их нет ни в приложении, ни в сети</string>
     <string name="privacy_seen">Видят контакты</string>
-    <string name="privacy_online">Статус «в сети»</string>
+    <string name="privacy_online">Статус «на связи»</string>
     <string name="privacy_online_sub">Нужен для доставки, не отключается</string>
     <string name="privacy_profile">Имя и аватар</string>
     <string name="privacy_profile_sub">Только контактам, не в сеть</string>

@@ -171,14 +171,23 @@ pub enum Payload {
     /// уже некуда будет деть: маячок присутствия обязан оставаться в бакете
     /// CONTROL 256 Б (M5), а отдельный пакет «я транзитный узел» был бы новым
     /// различимым классом трафика.
+    ///
+    /// `active` — приложение открыто на экране («в сети», п. 9 списка с телефона; сама
+    /// связь — «на связи»). Только своим и только если человек это не скрыл; ложное не
+    /// сериализуется, так что пинг без него — те же байты, что в 1.0, а старый клиент
+    /// незнакомое поле пропускает и видит лишь «на связи».
     Ping {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         transit: Option<TransitClaim>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        active: bool,
     },
-    /// Ответ на ping. `transit` — см. [`Payload::Ping`].
+    /// Ответ на ping. `transit` и `active` — см. [`Payload::Ping`].
     Pong {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         transit: Option<TransitClaim>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        active: bool,
     },
     /// Приглашение в голосовую комнату (DM-звонок). room_id = первые 16 байт
     /// SHA-256(min(keyA,keyB) ++ max(keyA,keyB)) — детерминирован для обеих сторон.
@@ -549,8 +558,8 @@ mod tests {
     fn all_payload_types_roundtrip() {
         for p in [
             Payload::Hello,
-            Payload::Ping { transit: None },
-            Payload::Pong { transit: None },
+            Payload::Ping { transit: None, active: false },
+            Payload::Pong { transit: None, active: false },
             Payload::Ack { id: 7 },
             Payload::Text { id: 1, text: "hi".into(), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false, sent: 1_790_000_000_000 },
             Payload::Media {
@@ -589,7 +598,7 @@ mod tests {
     #[test]
     fn reliable_id_covers_reliable_payloads() {
         assert_eq!(Payload::Ack { id: 5 }.reliable_id(), None);
-        assert_eq!(Payload::Ping { transit: None }.reliable_id(), None);
+        assert_eq!(Payload::Ping { transit: None, active: false }.reliable_id(), None);
         assert_eq!(Payload::RoomInvite { id: 5, room_id: vec![], audio: true, video: false }.reliable_id(), Some(5));
         assert_eq!(Payload::Retract { id: 6, target: 1 }.reliable_id(), Some(6));
         assert_eq!(Payload::GroupKeyRequest { id: 7, gid: vec![] }.reliable_id(), Some(7));
@@ -662,7 +671,7 @@ mod tests {
             enc(&Payload::RoomInvite { id: 11, room_id: vec![1u8; 16], audio: true, video: true }),
             enc(&Payload::RoomDecline { id: 12, room_id: vec![2u8; 16] }),
             enc(&Payload::Ack { id: 13 }),
-            enc(&Payload::Ping { transit: None }),
+            enc(&Payload::Ping { transit: None, active: false }),
             enc(&Payload::RoomPresence { gid: vec![9u8; 16], flags: 0b11 }),
             // msg3 рукопожатия и пустой пакет подтверждения сессии.
             crate::session::CONTROL_PACKET,
@@ -738,11 +747,11 @@ mod tests {
     fn presence_with_transit_claim_stays_in_control_bucket() {
         let claim = TransitClaim { digest: vec![0xab; 32], count: u32::MAX, epoch: u32::MAX };
         assert_eq!(
-            wire(&Payload::Ping { transit: Some(claim.clone()) }),
+            wire(&Payload::Ping { transit: Some(claim.clone()), active: true }),
             wire(&Payload::Ack { id: 1 }),
             "маячок с квитанциями обязан остаться неотличим от ack по размеру"
         );
-        assert_eq!(wire(&Payload::Pong { transit: Some(claim) }), wire(&Payload::Ack { id: 1 }));
+        assert_eq!(wire(&Payload::Pong { transit: Some(claim), active: true }), wire(&Payload::Ack { id: 1 }));
     }
 
     /// Пустое поле не должно появляться на проводе: маячок 1.0 — это голый тип.
@@ -753,9 +762,32 @@ mod tests {
             r#type: &'static str,
         }
         let bare = rmp_serde::to_vec_named(&Bare { r#type: "ping" }).unwrap();
-        assert_eq!(Payload::Ping { transit: None }.to_bytes().unwrap(), bare);
+        assert_eq!(Payload::Ping { transit: None, active: false }.to_bytes().unwrap(), bare);
         // И обратно: пакет без поля читается (совместимость в обе стороны).
-        assert_eq!(Payload::from_bytes(&bare).unwrap(), Payload::Ping { transit: None });
+        assert_eq!(Payload::from_bytes(&bare).unwrap(), Payload::Ping { transit: None, active: false });
+    }
+
+    /// Флаг «приложение открыто» совместим в обе стороны: старый клиент (пинг без поля)
+    /// читает новый пинг, пропуская поле, а новый читает старый как `active: false`.
+    #[test]
+    fn active_flag_is_compatible_with_old_ping() {
+        #[derive(Deserialize, Debug, PartialEq)]
+        #[serde(tag = "type", rename_all = "snake_case")]
+        enum Old {
+            Ping {
+                #[serde(default)]
+                transit: Option<TransitClaim>,
+            },
+        }
+        let new = Payload::Ping { transit: None, active: true }.to_bytes().unwrap();
+        assert_eq!(rmp_serde::from_slice::<Old>(&new).unwrap(), Old::Ping { transit: None });
+        #[derive(Serialize)]
+        struct Bare {
+            r#type: &'static str,
+        }
+        let old = rmp_serde::to_vec_named(&Bare { r#type: "ping" }).unwrap();
+        assert_eq!(Payload::from_bytes(&old).unwrap(), Payload::Ping { transit: None, active: false });
+        assert_eq!(Payload::from_bytes(&new).unwrap(), Payload::Ping { transit: None, active: true });
     }
 
     /// R-004: байты едут байтами. Полный чанк 12 КБ на проводе — чуть больше 12 КБ,

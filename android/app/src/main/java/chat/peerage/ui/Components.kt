@@ -210,6 +210,25 @@ internal fun StatusDot(online: Boolean) {
     Box(Modifier.size(10.dp).clip(CircleShape).background(if (online) HoloOnline else OfflineDot))
 }
 
+/** Цвет статуса (п. 9): зелёный — «в сети», жёлтый — «на связи», серый — связи нет. */
+internal fun presenceDot(p: Presence): Color = when (p) {
+    Presence.InApp -> HoloOnline
+    Presence.Reachable -> Tokens.Colors.reachable
+    Presence.Offline -> OfflineDot
+}
+
+/** Цвет подписи статуса: «не в сети» — тихим текстом, а не серой точкой. */
+internal fun presenceText(p: Presence): Color = if (p == Presence.Offline) Tokens.Colors.tertiary else presenceDot(p)
+
+@Composable
+internal fun presenceLabel(p: Presence): String = stringResource(
+    when (p) {
+        Presence.InApp -> R.string.status_in_network
+        Presence.Reachable -> R.string.status_reachable
+        Presence.Offline -> R.string.status_offline
+    },
+)
+
 /**
  * Аватар: буква имени на детерминированном цвете, картинка профиля или своя
  * иконка ([content]); опционально presence-точка в правом-нижнем углу.
@@ -227,6 +246,8 @@ internal fun SquareAvatar(
     bg: Color? = null,
     avatarBytes: ByteArray? = null,
     circle: Boolean = false,
+    /** Точка статуса по [Presence] (п. 9); задан — [online] не нужен. */
+    presence: Presence? = null,
     ring: Color = Tokens.Colors.surface,
     content: (@Composable () -> Unit)? = null,
 ) {
@@ -257,10 +278,11 @@ internal fun SquareAvatar(
                 )
             }
         }
-        if (online != null) {
+        val dot = presence?.let(::presenceDot) ?: online?.let { if (it) HoloOnline else OfflineDot }
+        if (dot != null) {
             Box(
                 Modifier.size(size * 0.30f).clip(CircleShape)
-                    .background(if (online) HoloOnline else OfflineDot)
+                    .background(dot)
                     .border(2.5.dp, ring, CircleShape),
             )
         }

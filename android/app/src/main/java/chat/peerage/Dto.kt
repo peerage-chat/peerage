@@ -437,7 +437,7 @@ internal fun MessageDto.toModel() = Message(
 internal sealed interface EngineEvent {
     @Serializable
     @SerialName("presence")
-    data class Presence(val peer: String, val online: Boolean) : EngineEvent
+    data class Presence(val peer: String, val online: Boolean, val active: Boolean = false) : EngineEvent
 
     /**
      * Новая строка переписки — личной (`chat` = ключ собеседника) или групповой
@@ -597,11 +597,13 @@ internal fun parseEvent(json: String): EngineEvent =
     runCatching { EngineJson.decodeFromString<EngineEvent>(json) }.getOrDefault(EngineEvent.Unknown)
 
 /** Разобрать список; битый ответ — пустой список, а не падение UI. */
-/** Переключатели «Приватности» (2.10): оба по умолчанию выключены, взаимны. */
+/** Переключатели «Приватности» (2.10): отчёты и набор по умолчанию выключены, «в сети»
+ *  (п. 9) — включено; все взаимны. */
 @Serializable
 data class PrivacyDto(
     @SerialName("read_receipts") val readReceipts: Boolean = false,
     val typing: Boolean = false,
+    @SerialName("in_app") val inApp: Boolean = true,
 )
 
 internal inline fun <reified T> decodeList(json: String): List<T> =

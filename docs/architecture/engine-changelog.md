@@ -30,6 +30,28 @@
 
 ---
 
+## 2026-11-24 · Два статуса: «на связи» и «в сети» · HASH
+
+**Причина:** пункт 9 списка с телефона (beta.md): «в сети» загоралось, пока приложение просто
+работало в фоне. Нужно отдельно «приложение открыто», и чтобы его можно было скрыть.
+
+- **Контракт:** `Payload::Ping`/`Pong` — новое поле `active: bool` (приложение открыто).
+  `messenger::Event::Presence { peer, online, active }`, `Messenger::set_active(bool)`.
+  `UiEvent::Presence` — поле `active`. `Engine::set_app_foreground(bool)`,
+  `Engine::set_in_app_status(bool)`; `privacy.json` и `privacy_json()` — поле `in_app`
+  (нет в файле — true). JNI: `Native.setAppForeground`, `Native.setInAppStatus`.
+- **Поведение:** открыл приложение (и не скрыл) — своим (набор `targets`) сразу уходит Ping с
+  `active`, убрал — Ping без него; в Pong — то же; вернувшемуся своему, пока мы «в сети», — Ping
+  сразу, а не через keepalive. Чужим флаг не уходит и от чужих не читается. Движок показывает
+  `active` только у контакта и только если своё не скрыто (взаимно). С уходом связи `active`
+  сбрасывается.
+- **Совместимость:** `active: false` не сериализуется — пинг без флага те же байты, что раньше;
+  старый клиент поле пропускает и видит только «на связи». Пакет остаётся в бакете CONTROL.
+- **Тесты:** `protocol::active_flag_is_compatible_with_old_ping`, бакет — в
+  `presence_with_transit_claim_stays_in_control_bucket`; messenger
+  `active_flag_reaches_contacts_only`, `active_flag_is_told_on_reconnect`; engine
+  `in_app_status_is_shown_by_default_and_mutual`; форма события — `event_wire_shape_is_stable`.
+
 ## 2026-11-24 · Зачистка JPEG оставляет поворот кадра · b6404667
 
 **Причина:** пункт 2 списка с телефона (beta.md) — вложения в ленте по своим пропорциям. При

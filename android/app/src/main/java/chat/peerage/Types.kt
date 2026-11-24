@@ -87,6 +87,12 @@ data class ContactRequest(
     val shownName: String get() = name.ifBlank { shortKey }
 }
 
+/**
+ * Статус контакта (п. 9 списка с телефона). «На связи» — узел отвечает, приложение может
+ * быть свёрнуто; «в сети» — приложение открыто на экране (если человек это не скрыл).
+ */
+enum class Presence { Offline, Reachable, InApp }
+
 data class Message(
     val id: Long,
     val text: String,

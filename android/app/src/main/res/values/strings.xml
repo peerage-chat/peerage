@@ -131,6 +131,7 @@
     <string name="status_online">online</string>
     <string name="status_offline">offline</string>
     <string name="status_in_network">online</string>
+    <string name="status_reachable">reachable</string>
     <plurals name="group_presence">
         <item quantity="one">%1$d member · %2$d online</item>
         <item quantity="other">%1$d members · %2$d online</item>
@@ -1021,8 +1022,11 @@
     <string name="privacy_not_sent">Never sent</string>
     <string name="privacy_not_sent_what">Phone number, email, contact list</string>
     <string name="privacy_not_sent_sub">Not in the app and not on the network</string>
+    <string name="privacy_in_app">“Online” status</string>
+    <string name="privacy_in_app_on">On — contacts see when the app is open</string>
+    <string name="privacy_in_app_off">Off — others\' online status is hidden too</string>
     <string name="privacy_seen">Contacts see</string>
-    <string name="privacy_online">Online status</string>
+    <string name="privacy_online">“Reachable” status</string>
     <string name="privacy_online_sub">Needed for delivery, cannot be turned off</string>
     <string name="privacy_profile">Name and avatar</string>
     <string name="privacy_profile_sub">Contacts only, never the network</string>

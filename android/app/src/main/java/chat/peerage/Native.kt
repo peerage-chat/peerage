@@ -397,12 +397,18 @@ object Native {
     /** Поле ввода личного чата изменилось — «печатаю» (частоту режет движок). */
     external fun typing(sessionPtr: Long, keyHex: String)
 
-    /** Переключатели приватности: JSON `{read_receipts, typing}`. */
+    /** Переключатели приватности: JSON `{read_receipts, typing, in_app}`. */
     external fun privacy(sessionPtr: Long): String
 
     external fun setReadReceipts(sessionPtr: Long, on: Boolean)
 
     external fun setTypingIndicator(sessionPtr: Long, on: Boolean)
+
+    /** «В сети» для своих: показывать или скрыть (взаимно). */
+    external fun setInAppStatus(sessionPtr: Long, on: Boolean)
+
+    /** Приложение на экране или нет — своим уходит флагом «в сети». */
+    external fun setAppForeground(sessionPtr: Long, on: Boolean)
     external fun renameContact(sessionPtr: Long, keyHex: String, name: String)
     external fun removeContact(sessionPtr: Long, keyHex: String)
 

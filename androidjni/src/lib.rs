@@ -1721,7 +1721,7 @@ pub extern "system" fn Java_chat_peerage_Native_typing<'local>(
     });
 }
 
-/// Переключатели приватности: JSON `{read_receipts, typing}`.
+/// Переключатели приватности: JSON `{read_receipts, typing, in_app}`.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_privacy<'local>(
     env: JNIEnv<'local>,
@@ -1759,6 +1759,34 @@ pub extern "system" fn Java_chat_peerage_Native_setTypingIndicator<'local>(
     jni_safe!((), {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return };
         e.set_typing_indicator(on != JNI_FALSE);
+    });
+}
+
+/// «В сети» для своих: показывать или скрыть (взаимно).
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_setInAppStatus<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    on: jboolean,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        e.set_in_app_status(on != JNI_FALSE);
+    });
+}
+
+/// Приложение вышло на экран или ушло с него (флаг «в сети» для своих).
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_setAppForeground<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    on: jboolean,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        e.set_app_foreground(on != JNI_FALSE);
     });
 }
 

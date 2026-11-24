@@ -963,6 +963,48 @@ fn read_receipts_are_opt_in_and_mutual() {
     assert_eq!(status_of(&a, &b_key, second), "delivered");
 }
 
+/// «В сети» (п. 9): контакт с открытым приложением виден как `active`, убрал — гаснет;
+/// по умолчанию показывается, скрыть можно, и взаимно — скрывший видит только «на связи».
+#[test]
+fn in_app_status_is_shown_by_default_and_mutual() {
+    let (a, b, _a_key, b_key) = pair("in-app", 75, 76);
+    let _ = a.send_text(&b_key, "привет").unwrap();
+    assert!(wait(10, || a.is_online(&b_key)), "связь поднялась");
+    let b_hex = hex::encode(b_key);
+    // Последний `active` по B в событиях A за время ожидания.
+    let seen = |want: bool| {
+        let mut last = None;
+        wait(5, || {
+            for ev in drain(&a, "presence") {
+                if ev["peer"] == b_hex {
+                    last = ev["active"].as_bool();
+                }
+            }
+            last == Some(want)
+        })
+    };
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&a.privacy_json()).unwrap()["in_app"],
+        true,
+        "по умолчанию показывается"
+    );
+
+    b.set_app_foreground(true);
+    assert!(seen(true), "открыл приложение — «в сети»");
+    b.set_app_foreground(false);
+    assert!(seen(false), "убрал — гаснет");
+
+    // B скрыл: на экране он или нет — для A только «на связи».
+    b.set_in_app_status(false);
+    b.set_app_foreground(true);
+    assert!(!seen(true), "скрывший не показывается");
+
+    // A скрыл своё — и чужое ему не показывается, хотя B снова открыт.
+    b.set_in_app_status(true);
+    a.set_in_app_status(false);
+    assert!(!seen(true), "взаимно: скрывший не видит других");
+}
+
 /// Индикатор набора (2.10): эфемерный, по выбору и взаимный; частые вызовы
 /// отправитель сжимает в один пакет на несколько секунд.
 #[test]
