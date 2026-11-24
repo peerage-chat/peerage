@@ -909,7 +909,12 @@ internal fun MessageInput(
         // человека, а не совпадение букв.
         val query = if (field.selection.collapsed) Mentions.query(field.text.toString(), field.selection.start) else null
         val candidates = query?.let { mentionCandidates(it.second) }.orEmpty()
-        if (query != null && candidates.isNotEmpty()) {
+        // Имя набрано целиком и подходит ровно один человек — упоминание уже готово:
+        // привязываем его к человеку и подсказку не держим (с телефона: «@Имя» с той же
+        // подсказкой под ним — после выбора и стёртого пробела или при наборе руками).
+        val complete = candidates.singleOrNull()?.takeIf { query != null && it.second == query.second }
+        LaunchedEffect(complete) { complete?.let { (key, name) -> onMentionPicked(key, name) } }
+        if (query != null && candidates.isNotEmpty() && complete == null) {
             MentionSuggestions(candidates) { key, name ->
                 replaceAt(query.first, field.selection.start, "@$name ")
                 onMentionPicked(key, name)
