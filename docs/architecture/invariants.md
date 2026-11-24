@@ -93,6 +93,12 @@ The save itself must be crash-safe — see §11.
 - ✅ **State is Compose snapshot state** (`mutableStateOf/List/Map`), safe to write from
   background threads (recomposition is scheduled by itself). StateFlow is deliberately not
   used.
+- ✅ **`derivedStateOf` only over UI-thread state** (list/scroll state, text field), never over
+  model state that background threads write. Compose ≤ 1.13 has a race there: a background
+  write while the main thread validates the derived value throws «Reading a state that was
+  created after the snapshot was taken» from `SnapshotStateObserver` — a crash of the whole
+  app (fixed upstream only in runtime 1.14.0-alpha01, b/574107950; item 35 in `beta.md`).
+  Read model state directly, or compute in the model.
 - 📋 **The node is down or off → the UI goes Offline immediately**, and input is disabled
   (do not pile up operations into nowhere). Coverage to be checked.
 

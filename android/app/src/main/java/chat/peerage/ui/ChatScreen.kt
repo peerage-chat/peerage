@@ -1417,11 +1417,10 @@ private fun MessageBubble(
                             if (m.replyTo != 0L) {
                                 // Ключ строки — пара «автор + id»: id посеян временем
                                 // отправителя и у обеих сторон может совпасть.
-                                // Поиск по всей истории чата — не на каждую перерисовку ряда (п. 19):
-                                // пересчитывается, только когда меняется сама история.
-                                val src = remember(chatId, m.replyTo, m.replySender) {
-                                    derivedStateOf { model.chat(chatId, group).firstOrNull { it.id == m.replyTo && it.sender == m.replySender } }
-                                }.value
+                                // Не derivedStateOf: ленту пишут фоновые потоки, а derivedStateOf над
+                                // такими состояниями в Compose 1.7 роняет приложение (п. 35,
+                                // invariants.md §5). Поиск по странице ленты дёшев.
+                                val src = model.chat(chatId, group).firstOrNull { it.id == m.replyTo && it.sender == m.replySender }
                                 QuoteBlock(
                                     model,
                                     src,
