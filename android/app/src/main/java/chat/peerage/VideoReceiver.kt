@@ -214,7 +214,8 @@ class VideoReceiver(
     private fun adaptiveMax(codec: MediaCodec): Pair<Int, Int>? = runCatching {
         val caps = codec.codecInfo.getCapabilitiesForType("video/avc")
         if (!caps.isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_AdaptivePlayback)) return null
-        val v = caps.videoCapabilities
+        // Аудиокодек вернул бы null; у видеодекодера его нет, но SDK 37 этого не обещает.
+        val v = caps.videoCapabilities ?: return null
         maxOf(width, 1920).coerceAtMost(v.supportedWidths.upper) to
             maxOf(height, 1080).coerceAtMost(v.supportedHeights.upper)
     }.getOrNull()

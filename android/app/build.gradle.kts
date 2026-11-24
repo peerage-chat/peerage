@@ -1,6 +1,6 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
     id("org.jlleitschuh.gradle.ktlint")
 }
@@ -26,7 +26,13 @@ fun versionCodeOf(v: String): Int {
 
 android {
     namespace = "chat.peerage"
-    compileSdk = 34
+    // Свежие androidx (Compose 1.13) требуют SDK 37.1+: минорный уровень API — только так.
+    // targetSdk остаётся 34: 35+ включает принудительный edge-to-edge (отдельная работа).
+    compileSdk {
+        version = release(37) { minorApiLevel = 2 }
+    }
+    // Закреплено: та же версия ставится в образ воспроизводимой сборки (reproducible/Dockerfile).
+    buildToolsVersion = "36.1.0"
 
     defaultConfig {
         applicationId = "chat.peerage"
@@ -56,10 +62,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
-
     buildFeatures { compose = true }
-    composeOptions { kotlinCompilerExtensionVersion = "1.5.15" }
 
     // JVM-юнит-тесты (чистая логика: displayName, парсинг контактов). org.json из
     // android.jar в юнит-тестах — заглушка; настоящий берётся из testImplementation ниже.
@@ -89,21 +92,25 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
+}
+
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2024.09.03"))
+    implementation(platform("androidx.compose:compose-bom:2026.11.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.activity:activity-compose:1.9.2")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
+    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.13.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.1")
     // QR-генерация (MeScreen) — ZXing core.
     implementation("com.google.zxing:core:3.5.3")
     // QR-сканер (AddScreen) — CameraX + ZXing core, собственный Compose UI.
-    implementation("androidx.camera:camera-camera2:1.3.4")
-    implementation("androidx.camera:camera-lifecycle:1.3.4")
-    implementation("androidx.camera:camera-view:1.3.4")
+    implementation("androidx.camera:camera-camera2:1.7.0")
+    implementation("androidx.camera:camera-lifecycle:1.7.0")
+    implementation("androidx.camera:camera-view:1.7.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     // Юнит-тесты (чистая Kotlin-логика без Android-фреймворка).

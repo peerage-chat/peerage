@@ -61,5 +61,5 @@ and `./gradlew testDebugUnitTest` for the unit tests.
 
 ## Toolchain versions
 
-AGP 8.5.2 · Kotlin 1.9.25 · Compose compiler 1.5.15 · compileSdk 34 · minSdk 24 · JDK 21
+AGP 9.5.2 (built-in Kotlin) · Kotlin 2.4.21 (+ Compose compiler plugin) · Compose BOM 2026.11.01 · compileSdk 37.2 · build-tools 36.1.0 · targetSdk 34 · minSdk 24 · JDK 21
 (the one bundled with Android Studio).

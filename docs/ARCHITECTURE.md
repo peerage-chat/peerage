@@ -237,7 +237,7 @@ hex values. (The design documents are in Russian.)
 ## 10. Build and development
 
 **Toolchain:** Rust 1.95+, Go 1.24+ (libygg, on Linux/WSL), Android NDK r28c + cargo-ndk,
-Gradle 8.9 + JDK 21. The Rust and Go parts are built on Linux (WSL on Windows).
+Gradle 9.9 + JDK 21. The Rust and Go parts are built on Linux (WSL on Windows).
 
 **Android:**
 ```sh

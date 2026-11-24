@@ -157,7 +157,7 @@ Releases are built from a tag in a clean Docker container by `scripts/release.sh
 anyone can rebuild a release and compare it with the published APK. See
 [docs/release.md](docs/release.md) and [reproducible/README.md](reproducible/README.md).
 
-Toolchain: Rust 1.95+, Go 1.24+, Android NDK r28c + cargo-ndk, Gradle 8.9 + JDK 21.
+Toolchain: Rust 1.95+, Go 1.24+, Android NDK r28c + cargo-ndk, Gradle 9.9 + JDK 21.
 Details: [ARCHITECTURE.md §10](docs/ARCHITECTURE.md#10-build-and-development).
 
 ## How it is built
