@@ -37,13 +37,10 @@ pub struct Privacy {
     pub read_receipts: bool,
     #[serde(default)]
     pub typing: bool,
-    /// Показывать своим, что приложение открыто («в сети»). Нет в файле — включено.
-    #[serde(default = "yes")]
+    /// Показывать своим, что приложение открыто («в сети»). По выбору, как отчёты и набор:
+    /// нет в файле — выключено (п. 72: только что установивший не должен быть «в сети»).
+    #[serde(default)]
     pub in_app: bool,
-}
-
-fn yes() -> bool {
-    true
 }
 
 impl Default for Privacy {
@@ -51,7 +48,7 @@ impl Default for Privacy {
         Privacy {
             read_receipts: false,
             typing: false,
-            in_app: true,
+            in_app: false,
         }
     }
 }

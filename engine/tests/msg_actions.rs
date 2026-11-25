@@ -964,9 +964,10 @@ fn read_receipts_are_opt_in_and_mutual() {
 }
 
 /// «В сети» (п. 9): контакт с открытым приложением виден как `active`, убрал — гаснет;
-/// по умолчанию показывается, скрыть можно, и взаимно — скрывший видит только «на связи».
+/// по умолчанию скрыт (п. 72 — только что установивший не «в сети»), показ — по выбору, и
+/// взаимно — скрывший видит только «на связи».
 #[test]
-fn in_app_status_is_shown_by_default_and_mutual() {
+fn in_app_status_is_opt_in_and_mutual() {
     let (a, b, _a_key, b_key) = pair("in-app", 75, 76);
     let _ = a.send_text(&b_key, "привет").unwrap();
     assert!(wait(10, || a.is_online(&b_key)), "связь поднялась");
@@ -985,10 +986,16 @@ fn in_app_status_is_shown_by_default_and_mutual() {
     };
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&a.privacy_json()).unwrap()["in_app"],
-        true,
-        "по умолчанию показывается"
+        false,
+        "по умолчанию скрыто"
     );
+    b.set_app_foreground(true);
+    assert!(!seen(true), "не включал — не «в сети»");
 
+    a.set_in_app_status(true);
+    b.set_in_app_status(true);
+    b.set_app_foreground(false);
+    assert!(seen(false), "свернул");
     b.set_app_foreground(true);
     assert!(seen(true), "открыл приложение — «в сети»");
     b.set_app_foreground(false);

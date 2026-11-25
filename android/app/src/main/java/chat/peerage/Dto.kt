@@ -607,13 +607,13 @@ internal fun parseEvent(json: String): EngineEvent =
     runCatching { EngineJson.decodeFromString<EngineEvent>(json) }.getOrDefault(EngineEvent.Unknown)
 
 /** Разобрать список; битый ответ — пустой список, а не падение UI. */
-/** Переключатели «Приватности» (2.10): отчёты и набор по умолчанию выключены, «в сети»
- *  (п. 9) — включено; все взаимны. */
+/** Переключатели «Приватности» (2.10): все по умолчанию выключены (в том числе «в сети»,
+ *  п. 72) и взаимны. */
 @Serializable
 data class PrivacyDto(
     @SerialName("read_receipts") val readReceipts: Boolean = false,
     val typing: Boolean = false,
-    @SerialName("in_app") val inApp: Boolean = true,
+    @SerialName("in_app") val inApp: Boolean = false,
 )
 
 internal inline fun <reified T> decodeList(json: String): List<T> =
