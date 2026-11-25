@@ -11,7 +11,8 @@
         "“Later” on the 24-word screen at first launch",
         "Backspace in the emoji panel keeps deleting while held",
         "Tapping “Forwarded from …” shows the author’s full key, ready to copy",
-        "Privacy policy — in About and on the first screen"
+        "Privacy policy — in About and on the first screen",
+        "Pinned chats can be reordered: “Reorder” in a pinned chat’s menu"
       ],
       "fixed": [
         "An answered call the other person left first is no longer “declined”",
