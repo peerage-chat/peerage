@@ -929,6 +929,7 @@
     <string name="act_on_day">%1$s, %2$s</string>
     <string name="act_retry">Повторить</string>
     <string name="act_received">Получено</string>
+    <string name="act_edited">Изменено</string>
     <string name="delete_note_all">«У всех» — просьба удалить их и у остальных. Если сообщения уже прочитаны или сохранены, это не отменить.</string>
     <plurals name="delete_title">
         <item quantity="one">Удалить %1$d сообщение?</item>

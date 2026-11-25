@@ -889,6 +889,7 @@
     <string name="act_on_day">%1$s, %2$s</string>
     <string name="act_retry">Retry</string>
     <string name="act_received">Received</string>
+    <string name="act_edited">Edited</string>
     <string name="delete_note_all">“For everyone” asks the others to delete them too. Messages already read or saved can’t be recalled.</string>
     <plurals name="delete_title">
         <item quantity="one">Delete %1$d message?</item>

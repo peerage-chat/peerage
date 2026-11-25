@@ -152,8 +152,22 @@ internal fun BubbleMenuItems(model: AppModel, t: BubbleActions, close: () -> Uni
         statusLine(m.mine, if (saved) "" else shownStatus(model, m, t.chat.group), m.time),
         color = Tokens.Colors.tertiary,
         fontSize = Tokens.Font.body,
-        modifier = Modifier.padding(start = Tokens.Space.l, end = Tokens.Space.l, top = Tokens.Space.m, bottom = Tokens.Space.m),
+        modifier = Modifier.padding(
+            start = Tokens.Space.l,
+            end = Tokens.Space.l,
+            top = Tokens.Space.m,
+            bottom = if (m.editedAt > 0) Tokens.Space.xxs else Tokens.Space.m,
+        ),
     )
+    // Когда изменено (п. 73): в пузыре — только слово «изменено», время правки — здесь.
+    if (m.editedAt > 0) {
+        Text(
+            stringResource(R.string.act_status, stringResource(R.string.act_edited), shortWhen(m.editedAt)),
+            color = Tokens.Colors.tertiary,
+            fontSize = Tokens.Font.body,
+            modifier = Modifier.padding(start = Tokens.Space.l, end = Tokens.Space.l, bottom = Tokens.Space.m),
+        )
+    }
     PopMenuDivider()
     PopMenuItem(TablerIcons.Reply, stringResource(R.string.chat_reply)) { act { model.startReply(m) } }
     if (m.text.isNotEmpty()) {
