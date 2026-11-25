@@ -698,6 +698,8 @@ internal fun SettingsAboutScreen(onBack: () -> Unit, onWhatsNew: () -> Unit, onP
 /**
  * Обновления в «О приложении» (app-ui.md → «Обновления»): тумблер ежедневной проверки и
  * «Проверить сейчас» с итогом. Ручная проверка — сама по себе согласие на этот запрос.
+ * Нашлось — следующий шаг тут же, пилюлей в строке (п. 77): те же действия, что у полосы
+ * на главной, без перехода туда.
  */
 @Composable
 private fun UpdatesCard() {
@@ -715,7 +717,7 @@ private fun UpdatesCard() {
             UpdateState.UpToDate -> stringResource(R.string.update_latest)
             UpdateState.CheckFailed -> stringResource(R.string.update_offline)
             is UpdateState.Available -> stringResource(R.string.update_available, s.info.versionName)
-            is UpdateState.Downloading -> stringResource(R.string.update_downloading)
+            is UpdateState.Downloading -> stringResource(R.string.update_downloading_sub, mb(s.done), mb(s.info.size))
             is UpdateState.Ready -> stringResource(R.string.update_ready)
             is UpdateState.DownloadFailed -> stringResource(R.string.update_failed)
             UpdateState.Rejected -> stringResource(R.string.update_rejected)
@@ -732,6 +734,17 @@ private fun UpdatesCard() {
                         modifier = Modifier.padding(top = Tokens.Space.xxs),
                     )
                 }
+            }
+            val next: Pair<Int, () -> Unit>? = when (s) {
+                is UpdateState.Available -> R.string.update_go to Updates::download
+                is UpdateState.Downloading -> R.string.update_cancel to Updates::cancel
+                is UpdateState.Ready -> R.string.update_install to Updates::installAgain
+                is UpdateState.DownloadFailed -> R.string.update_retry to Updates::download
+                else -> null
+            }
+            if (next != null) {
+                Spacer(Modifier.width(Tokens.Space.m))
+                PillButton(stringResource(next.first), neutral = s is UpdateState.Downloading, onClick = next.second)
             }
         }
     }

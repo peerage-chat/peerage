@@ -810,7 +810,7 @@ private fun UpdateStripView() {
 }
 
 /** Мегабайты для полосы — целыми. */
-private fun mb(bytes: Long): String = ((bytes + 512 * 1024) / (1024 * 1024)).toString()
+internal fun mb(bytes: Long): String = ((bytes + 512 * 1024) / (1024 * 1024)).toString()
 
 @Composable
 private fun installedVersion(): String {
