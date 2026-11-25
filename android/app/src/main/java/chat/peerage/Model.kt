@@ -2111,13 +2111,23 @@ class AppModel private constructor() {
         replyTarget = null
     }
 
-    /** Текст выделенного для буфера обмена: несколько сообщений — с новой строки. */
-    /** Текст выделенного (для копирования) — из ленты любого чата. */
+    /** Текст выделенного для буфера обмена (п. 75): одно — как есть, несколько — у каждого
+     *  автор и время ([CopyText]). */
     fun selectedTextOf(id: String, group: Boolean = false): String {
         val sel = selection
-        return chat(id, group)
+        val you = selfName.ifBlank { appContext?.getString(R.string.common_you).orEmpty() }
+        val entries = chat(id, group)
             .filter { MsgRef(it.id, it.sender) in sel }
-            .joinToString("\n") { if (it.text.isNotEmpty()) plainText(it) else it.name }
+            .map { m ->
+                val author = when {
+                    m.mine || isSaved(id) -> you
+                    group -> peerName(m.sender)
+                    else -> peerName(id)
+                }
+                CopyText.Entry(author, m.time, if (m.text.isNotEmpty()) plainText(m) else m.name)
+            }
+        val fmt = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+        return CopyText.format(entries) { t -> fmt.format(java.util.Date(t * 1000)) }
     }
 
     fun selectedText(key: String): String = selectedTextOf(key)
