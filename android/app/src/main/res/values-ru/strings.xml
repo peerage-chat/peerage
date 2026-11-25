@@ -1436,4 +1436,12 @@
     <string name="bg_vendor_miui_desc">Нужно «Нет ограничений»: иначе MIUI останавливает приложение в фоне</string>
     <string name="bg_vendor_app">Батарея приложения</string>
     <string name="bg_vendor_app_desc">Разрешить работу в фоне: иначе прошивка останавливает приложение</string>
+
+    <!-- Что нового (п. 51, app-ui.md → «Что нового») -->
+    <string name="changelog_lang">ru</string>
+    <string name="whatsnew_title">Что нового</string>
+    <string name="whatsnew_strip">Обновлено до %1$s</string>
+    <string name="whatsnew_close">Закрыть</string>
+    <string name="whatsnew_new">Новое</string>
+    <string name="whatsnew_fixed">Исправлено</string>
 </resources>

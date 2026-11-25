@@ -595,7 +595,7 @@ private fun channelState(ctx: android.content.Context, id: String): String {
  * шифрование, лицензия; «Сохранить лог». Шапка своя: знак стоит на фоне, не на панели.
  */
 @Composable
-internal fun SettingsAboutScreen(onBack: () -> Unit) {
+internal fun SettingsAboutScreen(onBack: () -> Unit, onWhatsNew: () -> Unit) {
     val ctx = LocalContext.current
     // Сохранить лог: человек выбирает, куда положить файл, и сам его пересылает.
     val saveLog = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
@@ -657,6 +657,9 @@ internal fun SettingsAboutScreen(onBack: () -> Unit) {
                 ValueRow(stringResource(R.string.settings_transport_label), stringResource(R.string.settings_transport_value), divider = false)
                 ValueRow(stringResource(R.string.settings_encryption_label), stringResource(R.string.settings_encryption_value))
                 ValueRow(stringResource(R.string.settings_license_label), "GPL-3.0")
+            }
+            CardSection {
+                ValueRow(stringResource(R.string.whatsnew_title), appVersionName(), divider = false, chevron = true, onClick = onWhatsNew)
             }
             UpdatesCard()
             CardSection {
@@ -826,4 +829,11 @@ internal fun EditProfileScreen(model: AppModel, onDone: () -> Unit) {
             }
         }
     }
+}
+
+/** Только versionName — для строки «Что нового» (номер сборки там лишний). */
+@Composable
+private fun appVersionName(): String {
+    val ctx = LocalContext.current
+    return remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull().orEmpty() }
 }

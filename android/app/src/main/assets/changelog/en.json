@@ -1,0 +1,68 @@
+{
+  "versions": [
+    {
+      "version": "0.4.0",
+      "date": "2026-11-25",
+      "summary": "Updates arrive by themselves, a changelog in the app, a reminder about background activity.",
+      "new": [
+        "Update check: once a day, only with consent; download and install from the chat list",
+        "“What’s new” after an update and in About",
+        "“Background activity” reminder in the chat list: on Xiaomi it opens Battery saver directly",
+        "Swipe right in a chat — back to the chat list",
+        "A gallery photo in the attach panel opens full screen",
+        "Emoji groups switch with a sideways swipe"
+      ],
+      "fixed": [
+        "A crash in the chat feed when replying with a quote",
+        "In groups, the last message of a block no longer stands apart",
+        "Selecting a message no longer highlights the gap below it",
+        "Fast scrolling loads older messages in time",
+        "Scrolling no longer starts swipe-to-reply",
+        "Newer Android libraries and Yggdrasil 0.5.15"
+      ]
+    },
+    {
+      "version": "0.3.0",
+      "date": "2026-11-24",
+      "summary": "Third beta: fixes and wishes from the second round of testing.",
+      "new": [
+        "Clear attachments by chat and by type",
+        "Groups look like direct chats; “reachable” in groups",
+        "Reactions and delete confirmation in Saved messages",
+        "Quick reactions follow use",
+        "Profile photos open in the common viewer"
+      ],
+      "fixed": [
+        "A crash in the chat feed during screen transitions",
+        "Smoother scrolling in long chats, the APK is ~10 MB smaller",
+        "Android 7–9: the attach panel no longer spends memory on full-size photos"
+      ]
+    },
+    {
+      "version": "0.2.0",
+      "date": "2026-11-24",
+      "summary": "Second beta: fixes and wishes from the first days of testing.",
+      "new": [
+        "Two statuses: “online” and “reachable”",
+        "Formatting in messages",
+        "The full emoji set, search by words",
+        "Selecting messages by dragging",
+        "Pinned messages, tap to jump"
+      ],
+      "fixed": [
+        "A large download no longer delays messages",
+        "Attachments keep their proportions; camera photos are no longer on their side",
+        "The “Connecting to network” screen is gone: chats open at once"
+      ]
+    },
+    {
+      "version": "0.1.0",
+      "date": "2026-11-23",
+      "summary": "First public beta of Peerage: a messenger without servers.",
+      "new": [
+        "Direct chats, groups, files, voice messages and calls, end-to-end encrypted over the Yggdrasil mesh"
+      ],
+      "fixed": []
+    }
+  ]
+}

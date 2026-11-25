@@ -165,11 +165,21 @@ internal fun ContactsScreen(
     // чатами, а не занимают экран постоянно. Шапка и вкладки остаются на месте.
     val strips: @Composable () -> Unit = {
         QueueStrip(model, nav.openOutbox)
-        // Одна полоса за раз: копии ключа, потом работа в фоне, потом обновления.
+        // Одна полоса за раз: копии ключа, «обновлено до», работа в фоне, обновления.
         val backup = backupStripNow(model)
+        val news = Changelog.pending
         val bg = bgStripNow()
         when {
             backup != null -> BackupStripView(model, nav, backup)
+            news != null -> HomeStrip(
+                icon = TablerIcons.InfoCircle,
+                title = stringResource(R.string.whatsnew_strip, news.version),
+                text = news.summary,
+                primary = stringResource(R.string.whatsnew_title),
+                onPrimary = nav.whatsNew,
+                secondary = stringResource(R.string.whatsnew_close),
+                onSecondary = Changelog::seen,
+            )
             bg != null -> BgStripView(bg)
             else -> UpdateStripView()
         }
@@ -508,6 +518,8 @@ internal class HomeNav(
     /** Копия ключа: true — с 24 слов (сделать, сверить), false — сразу проверка. */
     val keyFlow: (wordsFirst: Boolean) -> Unit,
     val dataBackup: () -> Unit,
+    /** «Что нового» — с полосы «Обновлено до X». */
+    val whatsNew: () -> Unit,
 )
 
 /**

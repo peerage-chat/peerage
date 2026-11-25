@@ -1356,4 +1356,12 @@
     <string name="bg_vendor_miui_desc">Needs “No restrictions”: otherwise MIUI stops the app in the background</string>
     <string name="bg_vendor_app">App battery</string>
     <string name="bg_vendor_app_desc">Allow background activity: otherwise the firmware stops the app</string>
+
+    <!-- Что нового (п. 51, app-ui.md → «Что нового») -->
+    <string name="changelog_lang">en</string>
+    <string name="whatsnew_title">What’s new</string>
+    <string name="whatsnew_strip">Updated to %1$s</string>
+    <string name="whatsnew_close">Close</string>
+    <string name="whatsnew_new">New</string>
+    <string name="whatsnew_fixed">Fixed</string>
 </resources>

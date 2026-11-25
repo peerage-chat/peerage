@@ -11,5 +11,6 @@ class PeerageApp : Application() {
         super.onCreate()
         Updates.init(this)
         Background.init(this)
+        Changelog.init(this)
     }
 }

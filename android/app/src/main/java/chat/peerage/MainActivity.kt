@@ -354,6 +354,7 @@ internal enum class Screen {
     VideoQuality,
     SettingsNotifications,
     SettingsAbout,
+    WhatsNew,
 }
 
 /** Раскладка по ширине окна (ADR-005, поправка 2): уже 720 dp — один экран, как на телефоне;
@@ -603,6 +604,7 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
                             Screen.VideoQuality -> TopBar(stringResource(R.string.media_video_quality), onBack = goBack)
                             Screen.SettingsNotifications -> TopBar(stringResource(R.string.settings_cat_notifications), onBack = goBack)
                             Screen.SettingsAbout -> {}
+                            Screen.WhatsNew -> TopBar(stringResource(R.string.whatsnew_title), onBack = goBack)
                             Screen.Scanner -> TopBar(stringResource(R.string.title_verify_qr), onBack = goBack)
                             Screen.ContactList -> TopBar(stringResource(R.string.menu_contacts), onBack = goBack) {
                                 BarIcon(TablerIcons.Search, stringResource(R.string.cd_search)) {
@@ -688,6 +690,7 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
                                             },
                                             keyFlow = openKeyFlow,
                                             dataBackup = { home(Screen.Backup) },
+                                            whatsNew = { home(Screen.WhatsNew) },
                                         ),
                                     )
                                 }
@@ -839,7 +842,8 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
                                 Screen.SettingsMedia -> SettingsMediaScreen(model) { screen = Screen.VideoQuality }
                                 Screen.VideoQuality -> SettingsVideoQualityScreen(model)
                                 Screen.SettingsNotifications -> SettingsNotificationsScreen(model)
-                                Screen.SettingsAbout -> SettingsAboutScreen(onBack = goBack)
+                                Screen.SettingsAbout -> SettingsAboutScreen(onBack = goBack) { screen = Screen.WhatsNew }
+                                Screen.WhatsNew -> WhatsNewScreen()
                                 Screen.ContactList -> ContactListScreen(
                                     model,
                                     query = contactQuery,

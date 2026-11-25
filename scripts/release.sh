@@ -10,7 +10,8 @@
 #   3. Подпись релизным ключом (scripts/lib/sign.sh; пароль спросит apksigner). Debug-ключом
 #      релиз не подписывается.
 #   4. В dist/<тег>/ — файлы релиза: peerage-<версия>-arm64-v8a.apk, update.json (манифест
-#      обновления) и SHA256SUMS. Их и прикладывают к релизу на GitHub.
+#      обновления) и SHA256SUMS. Их и прикладывают к релизу на GitHub. Рядом — notes.md,
+#      описание релиза из журнала приложения (assets/changelog/en.json на теге).
 #
 # Нужны: Docker (на Windows — в WSL, через scripts/w), Android SDK build-tools, ключ из
 # scripts/local.env (PEERAGE_KEYSTORE).
@@ -56,6 +57,14 @@ if [ -n "$prev" ]; then
         die "прошлый релиз $prev ($pver) не младше $TAG: обновление поверх не встанет"
 fi
 
+# Журнал приложения на теге: без записи этой версии «Что нового» молчит — проверить до сборки.
+PY="$(command -v python3 || command -v python)" || die "нужен python3"
+CHANGELOG=android/app/src/main/assets/changelog
+for lang in en ru; do
+    git show "$commit:$CHANGELOG/$lang.json" | "$PY" scripts/changelog-notes.py "$ver" >/dev/null ||
+        die "в $CHANGELOG/$lang.json на $TAG нет записи $ver"
+done
+
 OUT="dist/$TAG"
 BUILD="$OUT/build"
 APK="peerage-$ver-$ABI.apk"
@@ -93,6 +102,17 @@ cat >"$OUT/update.json" <<EOF
 }
 EOF
 (cd "$OUT" && sha256sum "$APK" update.json >SHA256SUMS)
+{
+    git show "$commit:$CHANGELOG/en.json" | "$PY" scripts/changelog-notes.py "$ver"
+    cat <<EOF
+### Install
+
+Download \`$APK\` and open it on the phone. Updates install over the previous version; the
+app checks for them itself once a day if allowed.
+
+Signing certificate (SHA-256): \`$SIGN_CERT_SHA256\`
+EOF
+} >"$OUT/notes.md"
 
 cat <<EOF
 
@@ -100,7 +120,8 @@ cat <<EOF
   $APK
   update.json
   SHA256SUMS
+  notes.md — описание релиза
 Отпечаток сертификата (SHA-256): $SIGN_CERT_SHA256
 
-Дальше: релиз $TAG на GitHub с этими тремя файлами; отпечаток — в описание релиза.
+Дальше: релиз $TAG на GitHub (pre-release) с этими тремя файлами; описание — notes.md.
 EOF
