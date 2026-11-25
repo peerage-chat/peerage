@@ -45,6 +45,8 @@ internal data class GalleryItem(
     val size: Long,
     val durationMs: Long, // 0 — картинка
     val isVideo: Boolean,
+    /** Когда изменён (с) — по нему галерея отсортирована, его показывает ползунок (п. 70). */
+    val date: Long = 0,
 )
 
 private val MEDIA_PERMS: Array<String> =
@@ -66,24 +68,21 @@ private suspend fun loadGallery(ctx: Context, from: Int, limit: Int = GALLERY_PA
         MediaStore.Files.FileColumns.SIZE,
         MediaStore.Files.FileColumns.MEDIA_TYPE,
         MediaStore.Files.FileColumns.DURATION,
-    )
-    val sel = "${MediaStore.Files.FileColumns.MEDIA_TYPE} IN (?, ?)"
-    val args = arrayOf(
-        MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE.toString(),
-        MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString(),
+        MediaStore.Files.FileColumns.DATE_MODIFIED,
     )
     runCatching {
         ctx.contentResolver.query(
             uri,
             cols,
-            sel,
-            args,
+            GALLERY_SEL,
+            galleryArgs(),
             "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC",
         )?.use { c ->
             val idI = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
             val szI = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
             val tpI = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
             val duI = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DURATION)
+            val dtI = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_MODIFIED)
             if (!c.moveToPosition(from - 1) && from > 0) return@use
             while (c.moveToNext() && out.size < limit) {
                 val video = c.getInt(tpI) == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
@@ -92,11 +91,32 @@ private suspend fun loadGallery(ctx: Context, from: Int, limit: Int = GALLERY_PA
                     size = c.getLong(szI),
                     durationMs = if (video) c.getLong(duI) else 0,
                     isVideo = video,
+                    date = c.getLong(dtI),
                 )
             }
         }
     }
     out
+}
+
+private const val GALLERY_SEL = "${MediaStore.Files.FileColumns.MEDIA_TYPE} IN (?, ?)"
+
+private fun galleryArgs() = arrayOf(
+    MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE.toString(),
+    MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString(),
+)
+
+/** Сколько снимков в галерее всего — длина дорожки ползунка (п. 70). */
+private suspend fun galleryCount(ctx: Context): Int = withContext(Dispatchers.IO) {
+    runCatching {
+        ctx.contentResolver.query(
+            MediaStore.Files.getContentUri("external"),
+            arrayOf(MediaStore.Files.FileColumns._ID),
+            GALLERY_SEL,
+            galleryArgs(),
+            null,
+        )?.use { it.count }
+    }.getOrNull() ?: 0
 }
 
 /**
@@ -167,18 +187,21 @@ internal fun AttachPanel(
     // Открытый во весь экран снимок (п. 34): нажатие на плитку смотрит, кружок в углу выбирает.
     var viewing by remember { mutableStateOf<android.net.Uri?>(null) }
     // Галерея страницами (п. 15 с телефона): прежде показывались только последние 120.
-    // Следующая — когда до конца загруженного осталось меньше двух экранов плиток.
+    // Следующая — когда до конца загруженного осталось меньше двух экранов плиток. Ползунок
+    // (п. 70) просит снимок дальше загруженного через [want] — грузится одним куском до него.
+    var total by remember { mutableIntStateOf(0) }
+    var want by remember { mutableIntStateOf(0) }
+    var done by remember { mutableStateOf(false) }
     LaunchedEffect(granted) {
         if (!granted) return@LaunchedEffect
-        var done = false
-        snapshotFlow {
-            val last = grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last >= items.size - GALLERY_PAGE / 4
-        }.collect { near ->
-            if (!near || done) return@collect
-            val page = loadGallery(ctx, from = items.size)
-            if (page.size < GALLERY_PAGE) done = true
-            items = items + page
+        total = galleryCount(ctx)
+        snapshotFlow { maxOf(grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0, want) }.collect { need ->
+            while (!done && need >= items.size - GALLERY_PAGE / 4) {
+                val limit = maxOf(GALLERY_PAGE, need - items.size + GALLERY_PAGE)
+                val page = loadGallery(ctx, from = items.size, limit = limit)
+                if (page.size < limit) done = true
+                items = items + page
+            }
         }
     }
     val gap = Tokens.Space.xs + Tokens.Space.xxs
@@ -195,17 +218,28 @@ internal fun AttachPanel(
             verticalArrangement = Arrangement.spacedBy(Tokens.Space.m),
         ) {
             if (granted) {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    state = grid,
-                    modifier = Modifier.fillMaxWidth().heightIn(max = Tokens.Size.attachGrid),
-                    horizontalArrangement = Arrangement.spacedBy(gap),
-                    verticalArrangement = Arrangement.spacedBy(gap),
-                ) {
-                    item { CameraTile(onCamera) }
-                    items(items) { g ->
-                        GalleryTile(g, selected.indexOfFirst { it.uri == g.uri }, onOpen = { viewing = g.uri }) { onToggle(g) }
+                Box(Modifier.fillMaxWidth().heightIn(max = Tokens.Size.attachGrid)) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        state = grid,
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(gap),
+                        verticalArrangement = Arrangement.spacedBy(gap),
+                    ) {
+                        item { CameraTile(onCamera) }
+                        items(items) { g ->
+                            GalleryTile(g, selected.indexOfFirst { it.uri == g.uri }, onOpen = { viewing = g.uri }) { onToggle(g) }
+                        }
                     }
+                    // Плитка «Камера» первой: снимок i — элемент i + 1 сетки.
+                    GalleryScroller(
+                        grid = grid,
+                        total = maxOf(total, items.size),
+                        dateAt = { i -> items.getOrNull(i)?.date },
+                        ready = { i -> i < items.size || done },
+                        onWant = { want = it },
+                        offset = 1,
+                    )
                 }
             } else {
                 // Отказ — не тупик: объясняем, зачем, и даём кнопку. Камера, файл и аудио
