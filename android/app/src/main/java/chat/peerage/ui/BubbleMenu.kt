@@ -181,6 +181,21 @@ internal fun BubbleMenuItems(model: AppModel, t: BubbleActions, close: () -> Uni
     if (!saved) {
         PopMenuItem(TablerIcons.Bookmark, stringResource(R.string.act_save)) { act { model.saveToSaved(t.chat, m) } }
     }
+    // Файл — в «Загрузки» (п. 60). Фото и видео сохраняются в галерею из просмотрщика.
+    if (m.blobId.isNotEmpty() && m.downloaded && m.kind != "image" && m.kind != "video") {
+        val storage = rememberPermissionRunner()
+        PopMenuItem(TablerIcons.Download, stringResource(R.string.act_save_downloads)) {
+            // До Android 10 нужна запись в общее хранилище; меню закрывается после ответа,
+            // иначе вместе с ним ушёл бы и ответ на запрос.
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                act { model.saveToDownloads(m) }
+            } else {
+                storage(arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE), R.string.perm_denied_storage) {
+                    act { model.saveToDownloads(m) }
+                }
+            }
+        }
+    }
     if (!fromSelection) {
         PopMenuItem(TablerIcons.CircleCheck, stringResource(R.string.act_select)) { act { model.toggleSelect(m) } }
     }

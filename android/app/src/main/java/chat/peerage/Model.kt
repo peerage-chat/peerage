@@ -306,6 +306,25 @@ class AppModel private constructor() {
         }
     }
 
+    /** Вложение — в общие «Загрузки» (п. 60); итог — тостом. */
+    fun saveToDownloads(m: Message) {
+        val ctx = appContext ?: return
+        exportBlob(m.blobId, "export", m.name) { f ->
+            heavy.execute {
+                val name = f?.name.orEmpty()
+                val ok = f != null && Downloads.save(ctx, f, name, m.mime)
+                f?.delete()
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    android.widget.Toast.makeText(
+                        ctx,
+                        if (ok) ctx.getString(R.string.saved_to_downloads, name) else ctx.getString(R.string.viewer_save_failed),
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
+    }
+
     /** Подтянуть байты блоба в кэш, если он уже есть локально (на [ops]). */
     private fun cacheBlob(blobId: String) {
         if (blobId.isNotEmpty() && !mediaBlobs.containsKey(blobId)) {
@@ -1940,6 +1959,9 @@ class AppModel private constructor() {
         ops.execute {
             val json = wireGroupRefs(refs.map { MsgRef(it.first, it.second) })
             Native.forwardMessages(sessionPtr, src.id, src.group, json, dst.id, dst.group, hide)
+            // Пересланное — последнее в целевом чате, как своё отправленное (п. 58): движок
+            // о своей отправке событий не шлёт, а в «Сохранённое» не придёт и подтверждение.
+            markSummariesDirty()
             // Целевой чат может быть открыт прямо сейчас — перечитываем его хвост.
             if (dst.group && currentGroup == dst.id) {
                 loadGroupHistory(dst.id)

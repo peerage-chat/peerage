@@ -1444,4 +1444,8 @@
     <string name="whatsnew_close">Закрыть</string>
     <string name="whatsnew_new">Новое</string>
     <string name="whatsnew_fixed">Исправлено</string>
+
+    <!-- Файл в «Загрузки» (п. 60) -->
+    <string name="act_save_downloads">Сохранить в «Загрузки»</string>
+    <string name="saved_to_downloads">Сохранено в «Загрузки»: %1$s</string>
 </resources>
