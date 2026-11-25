@@ -941,8 +941,12 @@ internal fun MessageInput(
             fadeOut(tween(Tokens.Anim.fast))
         // «Прикрепить» выезжает из строки ввода, как эмодзи: поле под панелью — подпись
         // набирается сразу, отправляет кнопка поля.
+        // Панели — с весом без заполнения: колонка меряет их ПОСЛЕ строки ввода, и панель
+        // получает только остаток высоты. Над клавиатурой поле ввода не выталкивается за
+        // край, даже если телефон не сообщил, что клавиатура поднята (п. 80).
         AnimatedVisibility(
             visible = attachOpen,
+            modifier = Modifier.weight(1f, fill = false),
             enter = panelEnter,
             exit = panelExit,
         ) {
@@ -969,6 +973,7 @@ internal fun MessageInput(
         }
         AnimatedVisibility(
             visible = emojiOpen,
+            modifier = Modifier.weight(1f, fill = false),
             enter = panelEnter,
             exit = panelExit,
         ) {

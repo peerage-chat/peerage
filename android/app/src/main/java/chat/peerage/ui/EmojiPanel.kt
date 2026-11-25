@@ -168,7 +168,12 @@ internal fun EmojiPanel(
 
         if (!ime) SectionLabel(stringResource(Groups[category].labelRes))
         val byGroup = remember(entries) { entries?.groupBy({ it.group }, { it.emoji }).orEmpty() }
-        HorizontalPager(pager, Modifier.fillMaxWidth().height(if (ime) 44.dp * GRID_ROWS_COMPACT else 220.dp)) { page ->
+        // Сетка уступает высоту первой: панели дали меньше, чем ей нужно (клавиатура поднята,
+        // а телефон об этом не сообщил, п. 80), — ужимается сетка, а не ряд групп.
+        HorizontalPager(
+            pager,
+            Modifier.fillMaxWidth().weight(1f, fill = false).height(if (ime) 44.dp * GRID_ROWS_COMPACT else 220.dp),
+        ) { page ->
             LazyVerticalGrid(
                 columns = GridCells.Fixed(8),
                 modifier = Modifier.fillMaxSize().padding(horizontal = Tokens.Space.s),
