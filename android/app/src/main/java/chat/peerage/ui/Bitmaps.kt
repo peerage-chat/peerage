@@ -6,6 +6,7 @@ import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
@@ -150,15 +151,20 @@ internal fun rememberBitmap(
     val density = LocalDensity.current
     val maxW = with(density) { maxWidth.roundToPx() }
     val maxH = with(density) { maxHeight.roundToPx() }
-    val key = (cacheKey?.takeIf { it.isNotEmpty() } ?: bytes?.contentHashCode()?.toString())
+    val id = (cacheKey?.takeIf { it.isNotEmpty() } ?: bytes?.contentHashCode()?.toString())
         ?.let { "$it@${maxW}x$maxH" }
-    if (bytes == null || key == null) return null
-    return produceState<ImageBitmap?>(Bitmaps.get(key), key, bytes) {
-        if (value == null) {
-            value = withContext(Dispatchers.Default) { Bitmaps.decode(bytes, maxW, maxH) }
-                ?.also { Bitmaps.put(key, it) }
-        }
-    }.value
+    if (bytes == null || id == null) return null
+    // Состояние — на каждый ключ свой (п. 61): produceState при смене ключа перезапускает
+    // загрузку, но НЕ сбрасывает значение, а загрузка шла только при пустом. Шапка, где
+    // фото А сменялось фото Б (чат из уведомления поверх открытого), так и показывала А.
+    return key(id) {
+        produceState<ImageBitmap?>(Bitmaps.get(id), bytes) {
+            if (value == null) {
+                value = withContext(Dispatchers.Default) { Bitmaps.decode(bytes, maxW, maxH) }
+                    ?.also { Bitmaps.put(id, it) }
+            }
+        }.value
+    }
 }
 
 /** Та же картинка, но под весь экран — для полноэкранного просмотра. */
