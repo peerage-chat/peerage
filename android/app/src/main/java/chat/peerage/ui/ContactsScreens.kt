@@ -105,8 +105,8 @@ internal fun ContactsScreen(
 
     // Запросы и приглашения — строками над чатами: в «Все», запросы ещё в «Личные»,
     // приглашения — в «Группы»; на вкладке «Запросы» — только они.
-    val showReq = activeFilter == "all" || activeFilter == "dm" || activeFilter == RequestsFolder
-    val showInv = activeFilter == "all" || activeFilter == "room" || activeFilter == RequestsFolder
+    val showReq = !nav.pick && (activeFilter == "all" || activeFilter == "dm" || activeFilter == RequestsFolder)
+    val showInv = !nav.pick && (activeFilter == "all" || activeFilter == "room" || activeFilter == RequestsFolder)
     val requests = if (showReq) model.contactRequests.sortedByDescending { it.time } else emptyList()
     val invites = if (showInv) model.groupInvites.toList() else emptyList()
     val dmList = (if (folder == null) model.contacts else model.contacts.filter { model.folderHasDm(folder, it.key) })
@@ -116,7 +116,9 @@ internal fun ContactsScreen(
     val me = model.me?.pubkey
     val savedTitle = stringResource(R.string.menu_saved)
     val savedSummary = me?.let { model.chatSummaries[model.chatKey(it, false)] }
-    val groupList = if (folder == null) model.groups else model.groups.filter { model.folderHasGroup(folder, it.gid) }
+    val groupList = (if (folder == null) model.groups else model.groups.filter { model.folderHasGroup(folder, it.gid) })
+        // В архивную группу писать нельзя — и переслать туда тоже.
+        .filterNot { nav.pick && it.archived }
 
     // Один список: закреплённые сверху (позже закрепили — выше), дальше по времени
     // последнего сообщения. Чаты без переписки уходят в конец по алфавиту — иначе
@@ -163,7 +165,8 @@ internal fun ContactsScreen(
 
     // Полосы над списком (очередь, копии) — первым элементом списка: уезжают вместе с
     // чатами, а не занимают экран постоянно. Шапка и вкладки остаются на месте.
-    val strips: @Composable () -> Unit = {
+    val strips: @Composable () -> Unit = strips@{
+        if (nav.pick) return@strips
         QueueStrip(model, nav.openOutbox)
         // Одна полоса за раз: копии ключа, «обновлено до», работа в фоне, обновления.
         val backup = backupStripNow(model)
@@ -196,7 +199,7 @@ internal fun ContactsScreen(
     }
     when {
         // Совсем новый профиль — пустая главная с действиями; «Сохранённое» и так в профиле.
-        model.contacts.isEmpty() && model.groups.isEmpty() && savedSummary == null &&
+        !nav.pick && model.contacts.isEmpty() && model.groups.isEmpty() && savedSummary == null &&
             model.contactRequests.isEmpty() && model.groupInvites.isEmpty() -> Column(Modifier.fillMaxSize()) {
             strips()
             HomeEmpty(nav)
@@ -234,6 +237,7 @@ internal fun ContactsScreen(
                     // Граница между закреплёнными и остальными — разделитель во
                     // всю ширину: он и разделяет группы, и не оставляет дыры.
                     fullDivider = i > 0 && rows[i - 1].pinned && !r.pinned,
+                    withMenu = !nav.pick,
                     onClick = { if (r.group) nav.openGroup(r.id) else nav.openDm(r.id) },
                 )
             }
@@ -264,6 +268,7 @@ private fun ChatListRow(
     row: ChatRowUi,
     first: Boolean,
     fullDivider: Boolean,
+    withMenu: Boolean = true,
     onClick: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -288,7 +293,7 @@ private fun ChatListRow(
         Box {
             Row(
                 Modifier.fillMaxWidth()
-                    .combinedClickable(onClick = onClick, onLongClick = { menu = true })
+                    .combinedClickable(onClick = onClick, onLongClick = { if (withMenu) menu = true })
                     .heightIn(min = Tokens.Size.chatRow)
                     .padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.m),
                 verticalAlignment = Alignment.CenterVertically,
@@ -520,6 +525,11 @@ internal class HomeNav(
     val dataBackup: () -> Unit,
     /** «Что нового» — с полосы «Обновлено до X». */
     val whatsNew: () -> Unit,
+    /**
+     * Список — выбор, куда переслать (п. 57): тот же список с папками, но только чаты, куда
+     * можно написать; без полос, запросов и меню строки. Тап — [openDm]/[openGroup].
+     */
+    val pick: Boolean = false,
 )
 
 /**

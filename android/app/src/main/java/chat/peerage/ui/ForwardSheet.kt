@@ -1,5 +1,3 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-
 package chat.peerage.ui
 
 import androidx.compose.foundation.clickable
@@ -7,115 +5,58 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.Group
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import chat.peerage.AppModel
-import chat.peerage.ChatTarget
 import chat.peerage.HoloAccent
-import chat.peerage.HoloBg
 import chat.peerage.HoloSecondary
 import chat.peerage.R
 import chat.peerage.Tokens
 
-/**
- * Куда переслать: контакты, группы и «Сохранённое» одним списком.
- *
- * Показывается, когда в модели уже отложены сообщения ([AppModel.forwarding]).
- * Архивные группы в список не попадают: писать в них нельзя, и предлагать их —
- * значит обещать отправку, которой не будет.
- */
+/** Шапка выбора, куда переслать (п. 57): сколько и крестик — отменить пересылку. */
 @Composable
-internal fun ForwardSheet(model: AppModel) {
-    val pending = model.forwarding ?: return
-    val state = rememberModalBottomSheetState()
-    val me = model.me?.pubkey.orEmpty()
-
-    ModalBottomSheet(
-        onDismissRequest = { model.forwarding = null },
-        sheetState = state,
-        containerColor = HoloBg,
-    ) {
-        Text(
-            stringResource(R.string.forward_title, pending.second.size),
-            color = Color.White,
-            fontSize = Tokens.Font.title,
-            modifier = Modifier.padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
-        )
-        // Скрыть автора — решение на эту пересылку. Ключ автора при этом не уходит
-        // вовсе: «скрыл» не должно означать «спрятал на экране, но отдал по проводу».
-        Row(
-            Modifier.fillMaxWidth()
-                .clickable { model.forwardHideAuthor = !model.forwardHideAuthor }
-                .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Checkbox(
-                checked = model.forwardHideAuthor,
-                onCheckedChange = { model.forwardHideAuthor = it },
-                colors = CheckboxDefaults.colors(checkedColor = HoloAccent),
-            )
-            Spacer(Modifier.width(Tokens.Space.xs))
-            Column {
-                Text(stringResource(R.string.forward_hide_author), color = Color.White, fontSize = Tokens.Font.label)
-                Text(
-                    stringResource(R.string.forward_hide_author_hint),
-                    color = HoloSecondary,
-                    fontSize = Tokens.Font.small,
-                )
-            }
-        }
-
-        LazyColumn(Modifier.fillMaxWidth().height(360.dp)) {
-            if (me.isNotEmpty()) {
-                item {
-                    TargetRow(Icons.Filled.Bookmark, stringResource(R.string.menu_saved)) {
-                        model.forwardTo(ChatTarget(me, group = false))
-                    }
-                }
-            }
-            items(model.groups.filterNot { it.archived }, key = { "g:" + it.gid }) { g ->
-                TargetRow(Icons.Filled.Group, g.name) {
-                    model.forwardTo(ChatTarget(g.gid, group = true))
-                }
-            }
-            items(model.contacts, key = { "c:" + it.key }) { c ->
-                TargetRow(Icons.Filled.Person, c.displayName) {
-                    model.forwardTo(ChatTarget(c.key, group = false))
-                }
-            }
-        }
-        Spacer(Modifier.height(Tokens.Space.m))
-    }
+internal fun ForwardTopBar(model: AppModel, onCancel: () -> Unit) {
+    TopBar(
+        stringResource(R.string.forward_title, model.forwarding?.second?.size ?: 0),
+        leading = { BarIcon(TablerIcons.X, stringResource(R.string.common_cancel), onClick = onCancel) },
+    )
 }
 
+/**
+ * «Скрыть автора» над списком выбора. Решение — на эту пересылку; ключ автора при этом не
+ * уходит вовсе: «скрыл» не должно означать «спрятал на экране, но отдал по проводу».
+ */
 @Composable
-private fun TargetRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, onClick: () -> Unit) {
-    ListRow(onClick = onClick) {
-        Icon(icon, null, tint = HoloAccent, modifier = Modifier.size(Tokens.Size.iconM))
-        Spacer(Modifier.width(Tokens.Space.m))
-        Text(title, color = Color.White, fontSize = Tokens.Font.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+internal fun ForwardHideAuthorRow(model: AppModel) {
+    Row(
+        Modifier.fillMaxWidth()
+            .clickable { model.forwardHideAuthor = !model.forwardHideAuthor }
+            .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(
+            checked = model.forwardHideAuthor,
+            onCheckedChange = { model.forwardHideAuthor = it },
+            colors = CheckboxDefaults.colors(checkedColor = HoloAccent),
+        )
+        Spacer(Modifier.width(Tokens.Space.xs))
+        Column {
+            Text(stringResource(R.string.forward_hide_author), color = Color.White, fontSize = Tokens.Font.label)
+            Text(stringResource(R.string.forward_hide_author_hint), color = HoloSecondary, fontSize = Tokens.Font.small)
+        }
     }
 }
 

@@ -329,7 +329,6 @@ internal fun ChatScreen(model: AppModel, onMedia: (MediaTab) -> Unit) {
                 FeedSeen(model, listState, msgs, chat)
             }
         }
-        ForwardSheet(model)
         if (search != null) {
             ChatSearchBar(model, search)
             ChatSearchSheets(model, search)

@@ -117,7 +117,8 @@ internal fun FolderTabs(
     model: AppModel,
     activeFilter: String,
     onFilter: (String) -> Unit,
-    onManage: () -> Unit = {},
+    /** null — без «+» (выбор, куда переслать: папки там только фильтр). */
+    onManage: (() -> Unit)? = {},
 ) {
     val unreadAll = model.unread.values.sum() + model.groupUnread.values.sum()
     Column(Modifier.fillMaxWidth()) {
@@ -144,16 +145,18 @@ internal fun FolderTabs(
             model.folders.forEach { f ->
                 FolderTab(f.name, f.id == activeFilter, 0) { onFilter(f.id) }
             }
-            val create = stringResource(R.string.folder_create)
             // «+» — такая же вкладка (макет `requests/Tab`): поля как у подписи, а не
             // квадрат касания — иначе он отъезжает от последней папки.
-            Box(
-                Modifier.heightIn(min = Tokens.Size.touch)
-                    .clickable(role = Role.Button, onClickLabel = create) { onManage() }
-                    .padding(horizontal = Tokens.Space.xs),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(TablerIcons.Plus, create, tint = Tokens.Colors.tertiary, modifier = Modifier.size(Tokens.Size.iconS))
+            if (onManage != null) {
+                val create = stringResource(R.string.folder_create)
+                Box(
+                    Modifier.heightIn(min = Tokens.Size.touch)
+                        .clickable(role = Role.Button, onClickLabel = create) { onManage() }
+                        .padding(horizontal = Tokens.Space.xs),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(TablerIcons.Plus, create, tint = Tokens.Colors.tertiary, modifier = Modifier.size(Tokens.Size.iconS))
+                }
             }
         }
         HorizontalDivider(thickness = 1.dp, color = Tokens.Colors.divider)

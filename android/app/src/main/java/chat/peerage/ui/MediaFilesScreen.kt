@@ -111,7 +111,6 @@ internal fun MediaFilesScreen(model: AppModel, onShowInChat: (MsgRef) -> Unit) {
             else -> MediaRows(model, b, list, onShowInChat)
         }
     }
-    ForwardSheet(model)
 }
 
 @Composable

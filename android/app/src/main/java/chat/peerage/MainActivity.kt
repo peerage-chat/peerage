@@ -355,6 +355,9 @@ internal enum class Screen {
     SettingsNotifications,
     SettingsAbout,
     WhatsNew,
+
+    /** Куда переслать (п. 57): главный список в режиме выбора. */
+    ForwardPick,
 }
 
 /** Раскладка по ширине окна (ADR-005, поправка 2): уже 720 dp — один экран, как на телефоне;
@@ -447,6 +450,8 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
     val lastScreen = remember { arrayOf(screen) }
     LaunchedEffect(screen) {
         if (lastScreen[0] == Screen.Share && screen != Screen.Share && model.shareDraft?.target == null) model.shareDraft = null
+        // Ушли с выбора, куда переслать, ничего не выбрав, — пересылка отменена.
+        if (lastScreen[0] == Screen.ForwardPick && screen != Screen.ForwardPick) model.forwarding = null
         lastScreen[0] = screen
     }
     // Ярлыки на значке и ярлыки чатов. Замок их не обходит: App() не рисуется, пока он закрыт.
@@ -484,6 +489,27 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
         val i = folders.indexOf(key)
         if (i >= 0) scope.launch { folderPager.animateScrollToPage(i) }
     }
+
+    // Пересылка (п. 57): отложили сообщения — выбор чата в самом списке чатов.
+    LaunchedEffect(model.forwarding != null) {
+        if (model.forwarding != null && screen != Screen.ForwardPick) screen = Screen.ForwardPick
+    }
+    // Выбрали чат — переслать и открыть его вместо исходного: «назад» ведёт к списку.
+    val forwardInto: (ChatTarget) -> Unit = { t ->
+        model.forwardTo(t)
+        nav.leave(setOf(Screen.ForwardPick))
+        if (t != model.openChatTarget()) {
+            if (screen in CHAT_SCREENS) nav.back()
+            openTarget(t)
+        }
+    }
+    val forwardNav = HomeNav(
+        openDm = { forwardInto(ChatTarget(it, group = false)) },
+        openGroup = { forwardInto(ChatTarget(it, group = true)) },
+        openRequest = {}, openInvite = {}, openOutbox = {}, myCode = {}, scan = {}, newGroup = {},
+        keyFlow = {}, dataBackup = {}, whatsNew = {},
+        pick = true,
+    )
 
     // «Назад» — одна функция и для системной кнопки, и для стрелки в шапке.
     val goBack: () -> Unit = {
@@ -631,6 +657,10 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
                             Screen.Folders -> TopBar(stringResource(R.string.folders_title), onBack = goBack)
                             Screen.FolderEdit -> FolderEditTopBar(model, onBack = goBack)
                             Screen.Search -> SearchTopBar(model, onBack = goBack)
+                            Screen.ForwardPick -> ForwardTopBar(model) {
+                                model.forwarding = null
+                                goBack()
+                            }
                             Screen.Share -> ShareTopBar {
                                 model.shareDraft = null
                                 goBack()
@@ -906,6 +936,11 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
                                 Screen.Search -> SearchScreen(model, onOpen = openTarget)
                                 // Один чат открывает эффект «Поделиться» (цель уже в черновике).
                                 Screen.Share -> ShareScreen(model, onOpenOne = {}, onSent = { nav.leave(setOf(Screen.Share)) })
+                                Screen.ForwardPick -> Column {
+                                    ForwardHideAuthorRow(model)
+                                    FolderTabs(model, activeFilter, onFilter = selectFolder, onManage = null)
+                                    ChatsPager(model, folderPager, forwardNav)
+                                }
                             }
                         }
                     }
