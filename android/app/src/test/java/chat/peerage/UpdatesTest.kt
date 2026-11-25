@@ -76,6 +76,20 @@ class UpdatesTest {
     }
 
     @Test
+    fun highest_version_wins_over_a_later_patch_of_an_older_line() {
+        // 0.4.2 выпущена после 0.5.0 — GitHub ставит её первой, но новее 0.5.0.
+        val releases = """
+            [
+              {"tag_name": "v0.4.2", "draft": false, "assets": [{"name": "update.json"}]},
+              {"tag_name": "v0.5.0", "draft": false, "assets": [{"name": "update.json"}]},
+              {"tag_name": "v0.4.1", "draft": false, "assets": [{"name": "update.json"}]},
+              {"tag_name": "nightly", "draft": false, "assets": [{"name": "update.json"}]}
+            ]
+        """.trimIndent()
+        assertEquals("v0.5.0", UpdateManifest.releaseTag(releases))
+    }
+
+    @Test
     fun drafts_are_skipped() {
         val releases = """
             [

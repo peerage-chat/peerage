@@ -49,8 +49,11 @@ ver="$(version_at "$commit")"
 [ "v$ver" = "$TAG" ] || die "тег $TAG, а в build.gradle.kts на нём версия $ver"
 code="$(version_code "$ver")"
 
-# Прошлый релиз — самый новый другой тег v*: его versionCode должен быть меньше.
-prev="$(git tag --list 'v*' | grep -vx "$TAG" | sort -V | tail -1 || true)"
+# Прошлый релиз — старший другой тег той же линии vM.m.* (0.4.2 после 0.5.0 сравнивается
+# с 0.4.1); первый релиз линии — со старшим тегом вообще. Его versionCode должен быть меньше.
+line="${TAG%.*}."
+prev="$(git tag --list "${line}*" | grep -vx "$TAG" | sort -V | tail -1 || true)"
+[ -n "$prev" ] || prev="$(git tag --list 'v*' | grep -vx "$TAG" | sort -V | tail -1 || true)"
 if [ -n "$prev" ]; then
     pver="$(version_at "$prev")"
     [ -n "$pver" ] && [ "$(version_code "$pver")" -ge "$code" ] &&

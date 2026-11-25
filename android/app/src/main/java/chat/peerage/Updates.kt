@@ -47,15 +47,21 @@ object UpdateManifest {
     private val safeName = Regex("[A-Za-z0-9._-]+")
     private val hex64 = Regex("[0-9a-f]{64}")
 
-    /** Тег новейшего релиза, у которого есть `update.json` (pre-release тоже: до 1.0 все такие). */
+    /**
+     * Тег релиза со старшей версией (`vM.m.p`), у которого есть `update.json` (pre-release
+     * тоже: до 1.0 все такие). Старшей, а не свежей: патч старой линии (0.4.2) может выйти
+     * после 0.5.0, и GitHub поставит его первым.
+     */
     fun releaseTag(releasesJson: String): String? {
         val list = runCatching { json.parseToJsonElement(releasesJson) as? JsonArray }.getOrNull() ?: return null
         return list.asSequence()
             .mapNotNull { it as? JsonObject }
             .filter { it["draft"]?.jsonPrimitive?.booleanOrNull != true }
-            .firstOrNull { r -> r["assets"]?.jsonArray?.any { it.jsonObject.str("name") == "update.json" } == true }
-            ?.str("tag_name")
-            ?.takeIf { safeName.matches(it) }
+            .filter { r -> r["assets"]?.jsonArray?.any { it.jsonObject.str("name") == "update.json" } == true }
+            .mapNotNull { it.str("tag_name")?.takeIf { t -> safeName.matches(t) } }
+            .mapNotNull { t -> Changelog.versionCode(t.removePrefix("v"))?.let { t to it } }
+            .maxByOrNull { it.second }
+            ?.first
     }
 
     /** Манифест → обновление для первого подходящего ABI из [abis]; неизвестный формат и мусор — null. */
