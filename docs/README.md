@@ -18,7 +18,7 @@ picture, and **[project-state.md](project-state.md)** for what actually works to
 | **Security and threat model** | [SECURITY.md](SECURITY.md), [architecture/threat-model.md](architecture/threat-model.md) (assets, adversaries, guarantees), [architecture/security-audit-2026-07-02.md](architecture/security-audit-2026-07-02.md) (crypto audit, Russian) |
 | **Scope and order of work** | [v1.0-scope.md](v1.0-scope.md), [completion-plan.md](completion-plan.md), [ROADMAP.md](ROADMAP.md) (Russian) |
 | **UI** | [design/app-ui.md](design/app-ui.md) (language, source of truth), [design/call-ui.md](design/call-ui.md) (calls), [design/tokens.md](design/tokens.md) (colours, spacing) — Russian |
-| **Plans** | [plans/media-webrtc-parity.md](plans/media-webrtc-parity.md), [plans/security-hardening.md](plans/security-hardening.md) (Russian) |
+| **Plans** | [plans/media-webrtc-parity.md](plans/media-webrtc-parity.md), [plans/security-hardening.md](plans/security-hardening.md), [plans/play-store.md](plans/play-store.md) (Russian) |
 | **Known bugs** | [BUGS.md](BUGS.md) (Russian) |
 | **History** | [archive/](archive/) |
 
