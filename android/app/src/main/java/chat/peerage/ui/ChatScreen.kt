@@ -1897,8 +1897,10 @@ internal fun VoiceAttachment(bytes: ByteArray?, blobId: String, knownDurationMs:
         player.value?.seekTo(ms) ?: prepare(start = false, at = ms)
     }
 
+    // Растягивается на ширину пузыря (её задают время в углу, «Переслано», цитата), а волна —
+    // на всё свободное место: иначе справа от неё пустота (п. 79).
     Row(
-        Modifier.padding(end = Tokens.Size.metaReserve).widthIn(min = 150.dp),
+        Modifier.layoutId(BubbleStretch).padding(end = Tokens.Size.metaReserve),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -1931,12 +1933,13 @@ internal fun VoiceAttachment(bytes: ByteArray?, blobId: String, knownDurationMs:
             }
         }
         Spacer(Modifier.width(Tokens.Space.m))
-        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
             VoiceBars(
                 wave?.levels,
                 bars,
                 posMs.toFloat() / durationMs.coerceAtLeast(1),
                 onSeek = if (bytes != null && durationMs > 0) ::seek else null,
+                modifier = Modifier.fillMaxWidth(),
             )
             Text(
                 when {
