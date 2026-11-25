@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Group
@@ -422,9 +423,16 @@ private fun ChatRowBadge(model: AppModel, row: ChatRowUi) {
                 tint = Tokens.Colors.tertiary,
                 modifier = Modifier.size(Tokens.Size.iconXs),
             )
-            "pending", "queued" -> Icon(
+            "pending" -> Icon(
                 Icons.Filled.Schedule,
                 stringResource(R.string.status_sending),
+                tint = Tokens.Colors.tertiary,
+                modifier = Modifier.size(Tokens.Size.iconXs),
+            )
+            // Собеседник не в сети — облако, как в пузыре (п. 71), а не часы «отправляется».
+            "queued" -> Icon(
+                Icons.Filled.CloudQueue,
+                stringResource(R.string.status_queued),
                 tint = Tokens.Colors.tertiary,
                 modifier = Modifier.size(Tokens.Size.iconXs),
             )
