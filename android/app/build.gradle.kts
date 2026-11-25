@@ -16,7 +16,7 @@ ktlint {
 }
 
 /** Версия приложения (semver без суффиксов): её же несёт тег релиза. */
-val APP_VERSION = "0.4.0"
+val APP_VERSION = "0.4.1"
 
 fun versionCodeOf(v: String): Int {
     val parts = v.split(".").map { it.toIntOrNull() ?: error("версия $v: только числа M.m.p") }
