@@ -1,6 +1,23 @@
 {
   "versions": [
     {
+      "version": "0.4.1",
+      "date": "2026-11-25",
+      "summary": "Forwarding through the chat list, files to Downloads, fixes after 0.4.0.",
+      "new": [
+        "Forwarding opens the chat list itself, with folders, as on the main screen",
+        "A file from a chat can be saved to Downloads",
+        "Pinned messages show who wrote them",
+        "“Later” on the 24-word screen at first launch",
+        "Backspace in the emoji panel keeps deleting while held"
+      ],
+      "fixed": [
+        "An answered call the other person left first is no longer “declined”",
+        "A forwarded attachment shows up as the last message in the chat list right away",
+        "The emoji panel fits above the keyboard together with the message field"
+      ]
+    },
+    {
       "version": "0.4.0",
       "date": "2026-11-25",
       "summary": "Updates arrive by themselves, a changelog in the app, a reminder about background activity.",
