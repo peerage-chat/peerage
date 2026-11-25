@@ -1368,4 +1368,9 @@
     <!-- Файл в «Загрузки» (п. 60) -->
     <string name="act_save_downloads">Save to Downloads</string>
     <string name="saved_to_downloads">Saved to Downloads: %1$s</string>
+
+    <!-- Автор пересланного (п. 64) -->
+    <string name="forward_author_title">Forwarded from</string>
+    <string name="forward_author_stranger">Not in contacts</string>
+    <string name="forward_author_copy">Copy key</string>
 </resources>
