@@ -67,6 +67,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -1491,8 +1492,19 @@ internal fun PinnedBar(model: AppModel, chat: String, group: Boolean, canUnpin: 
                 color = HoloAccent,
                 fontSize = Tokens.Font.caption,
             )
+            // Чьё — первым словом строки (п. 52): в группе без автора закреп читается как
+            // слова того, кто его поставил.
+            val author = when {
+                top.mine -> stringResource(R.string.common_you)
+                else -> groupSenderName(model, top.sender.ifEmpty { if (group) "" else chat })
+            }
+            val body = model.shownText(top).ifEmpty { stringResource(R.string.pin_attachment) }
             Text(
-                model.shownText(top).ifEmpty { stringResource(R.string.pin_attachment) },
+                buildAnnotatedString {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Medium)) { append(author) }
+                    append(": ")
+                    append(body)
+                },
                 color = Color.White,
                 fontSize = Tokens.Font.body,
                 maxLines = 1,
