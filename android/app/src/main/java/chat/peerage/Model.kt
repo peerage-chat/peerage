@@ -2174,6 +2174,9 @@ class AppModel private constructor() {
             } else {
                 Native.deleteMessages(sessionPtr, key, wireDmRefs(refs))
                 reloadHistory(key)
+                // События от движка тут нет (у группы — GroupRetracted): удалённое могло
+                // быть последним, строку списка перечитываем сами (п. 76).
+                markSummariesDirty()
             }
         }
     }
