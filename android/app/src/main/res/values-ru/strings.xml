@@ -983,6 +983,12 @@
         <item quantity="many">В сети · %d узлов</item>
         <item quantity="other">В сети · %d узла</item>
     </plurals>
+    <plurals name="net_status_reachable">
+        <item quantity="one">На связи · %d узел</item>
+        <item quantity="few">На связи · %d узла</item>
+        <item quantity="many">На связи · %d узлов</item>
+        <item quantity="other">На связи · %d узла</item>
+    </plurals>
     <string name="net_status_offline">Нет соединения · поиск узлов</string>
     <plurals name="net_nodes">
         <item quantity="one">%d узел</item>

@@ -86,7 +86,7 @@ internal fun ProfileScreen(model: AppModel, navigate: (Screen) -> Unit) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                NetStatus(model.netPeers, Tokens.Font.body)
+                NetStatus(model, Tokens.Font.body)
                 Text(
                     me.address,
                     color = Tokens.Colors.tertiary,
@@ -188,16 +188,22 @@ private fun LanguageSheet(onClose: () -> Unit) {
     }
 }
 
-/** Статус меша словами: «В сети · 8 узлов» зелёным или «Нет соединения · поиск узлов» янтарём. */
+/**
+ * Свой статус словами: «В сети · 8 узлов» зелёным; «в сети» скрыт в приватности — «На связи ·
+ * 8 узлов» жёлтым, как меня видят контакты (п. 72); узлов нет — «Нет соединения · поиск узлов»
+ * янтарём.
+ */
 @Composable
-internal fun NetStatus(peers: Int, size: TextUnit, modifier: Modifier = Modifier) {
+internal fun NetStatus(model: AppModel, size: TextUnit, modifier: Modifier = Modifier) {
+    val peers = model.netPeers
+    val (text, color) = when {
+        peers <= 0 -> stringResource(R.string.net_status_offline) to Tokens.Colors.warn
+        model.privacy.inApp -> pluralStringResource(R.plurals.net_status_online, peers, peers) to Tokens.Colors.online
+        else -> pluralStringResource(R.plurals.net_status_reachable, peers, peers) to Tokens.Colors.reachable
+    }
     Text(
-        if (peers > 0) {
-            pluralStringResource(R.plurals.net_status_online, peers, peers)
-        } else {
-            stringResource(R.string.net_status_offline)
-        },
-        color = if (peers > 0) Tokens.Colors.online else Tokens.Colors.warn,
+        text,
+        color = color,
         fontSize = size,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,

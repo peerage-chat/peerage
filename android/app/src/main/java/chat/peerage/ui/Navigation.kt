@@ -99,7 +99,7 @@ internal fun HomeTopBar(model: AppModel, onProfile: () -> Unit, onNetwork: () ->
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            NetStatus(model.netPeers, Tokens.Font.small, Modifier.semantics { contentDescription = network })
+            NetStatus(model, Tokens.Font.small, Modifier.semantics { contentDescription = network })
         }
         BarIcon(TablerIcons.Search, stringResource(R.string.cd_search), onClick = onSearch)
     }

@@ -939,6 +939,10 @@
         <item quantity="one">Online · %d node</item>
         <item quantity="other">Online · %d nodes</item>
     </plurals>
+    <plurals name="net_status_reachable">
+        <item quantity="one">Reachable · %d node</item>
+        <item quantity="other">Reachable · %d nodes</item>
+    </plurals>
     <string name="net_status_offline">No connection · looking for nodes</string>
     <plurals name="net_nodes">
         <item quantity="one">%d node</item>
