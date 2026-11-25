@@ -3,7 +3,7 @@
     {
       "version": "0.4.1",
       "date": "2026-11-25",
-      "summary": "Forwarding through the chat list, files to Downloads, fixes after 0.4.0.",
+      "summary": "Albums, voice scrubbing, forwarding through the chat list, fixes after 0.4.0.",
       "new": [
         "Forwarding opens the chat list itself, with folders, as on the main screen",
         "A file from a chat can be saved to Downloads",
@@ -12,7 +12,13 @@
         "Backspace in the emoji panel keeps deleting while held",
         "Tapping “Forwarded from …” shows the author’s full key, ready to copy",
         "Privacy policy — in About and on the first screen",
-        "Pinned chats can be reordered: “Reorder” in a pinned chat’s menu"
+        "Pinned chats can be reordered: “Reorder” in a pinned chat’s menu",
+        "Voice messages and audio can be scrubbed along the waveform",
+        "Photos sent together arrive as one album; “Group” toggle in the attachment panel",
+        "Fast scrolling in the attachment panel gallery, with the photo’s month",
+        "Edit time in the menu of an edited message",
+        "Privacy indicators are set up at first launch",
+        "Copying several messages keeps each one’s author and time"
       ],
       "fixed": [
         "An answered call the other person left first is no longer “declined”",
@@ -20,7 +26,9 @@
         "The emoji panel fits above the keyboard together with the message field",
         "A chat opened from a notification over another one no longer shows the other chat’s avatar",
         "A new folder starts without “Direct” turned on; Saved can be added to a folder",
-        "“Share contact” gives a code the contact can be added with"
+        "“Share contact” gives a code the contact can be added with",
+        "A message to an offline recipient is marked “queued” right away",
+        "A hidden online status is no longer shown on one’s own profile either"
       ]
     },
     {
