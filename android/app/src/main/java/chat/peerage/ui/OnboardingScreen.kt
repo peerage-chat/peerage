@@ -107,7 +107,7 @@ internal fun OnboardingFlow(model: AppModel, onFinish: () -> Unit) {
         OnbStep.Welcome -> WelcomeStep(onStart = { step = OnbStep.Profile }, onImport = { importing = true })
         OnbStep.Profile -> ProfileStep(model, onBack = back) { step = OnbStep.Key }
         OnbStep.Key -> KeyIntroStep(onBack = back, onShow = { step = OnbStep.Phrase }, onLater = { step = OnbStep.Perms })
-        OnbStep.Phrase -> PhraseStep(model, onBack = back) { step = OnbStep.Check }
+        OnbStep.Phrase -> PhraseStep(model, onBack = back, onLater = { step = OnbStep.Perms }) { step = OnbStep.Check }
         OnbStep.Check -> Column(Modifier.fillMaxSize().background(Tokens.Colors.bg)) {
             OnbTop(OnbStep.Check.bar, back)
             // Копия отмечается сделанной только проверкой; провал — тоже итог: на главной
@@ -783,9 +783,13 @@ private fun KeyIntroStep(onBack: () -> Unit, onShow: () -> Unit, onLater: () -> 
     }
 }
 
-/** «24 слова» (`onboard/Phrase`): сетка под FLAG_SECURE; слова живут, пока шаг на экране. */
+/**
+ * «24 слова» (`onboard/Phrase`): сетка под FLAG_SECURE; слова живут, пока шаг на экране.
+ * «Позже» (п. 54) — как на шаге «Копия ключа»: открыли слова, а записать нечем — копия
+ * остаётся несделанной, на главной о ней напомнит полоса.
+ */
 @Composable
-private fun PhraseStep(model: AppModel, onBack: () -> Unit, onWritten: () -> Unit) {
+private fun PhraseStep(model: AppModel, onBack: () -> Unit, onLater: () -> Unit, onWritten: () -> Unit) {
     SecureFlag()
     LaunchedEffect(Unit) { model.revealSeedPhrase() }
     DisposableEffect(Unit) { onDispose { model.clearRevealedPhrase() } }
@@ -796,6 +800,8 @@ private fun PhraseStep(model: AppModel, onBack: () -> Unit, onWritten: () -> Uni
         sub = stringResource(R.string.onb_phrase_sub),
         primary = stringResource(R.string.onb_wrote_down),
         onPrimary = onWritten,
+        secondary = stringResource(R.string.onb_skip_remind),
+        onSecondary = onLater,
         note = {
             Row(
                 Modifier.padding(bottom = Tokens.Space.xs),
