@@ -2,6 +2,9 @@ package chat.peerage.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -33,14 +36,20 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -183,22 +192,53 @@ internal fun EmojiPanel(
                 }
             }
             // Забой: системная клавиатура сейчас скрыта, а эмодзи ставят подряд и промахиваются.
-            if (onBackspace != null) {
-                Box(
-                    Modifier.size(44.dp).clip(RoundedCornerShape(Tokens.Radius.chip)).clickable { onBackspace() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Backspace,
-                        stringResource(R.string.emoji_backspace),
-                        tint = HoloSecondary,
-                        modifier = Modifier.size(Tokens.Size.iconM),
-                    )
-                }
-            }
+            if (onBackspace != null) BackspaceKey(onBackspace)
         }
     }
 }
+
+/**
+ * Забой с автоповтором, как на клавиатуре (п. 55): нажатие — один символ, удержание —
+ * после паузы стирает подряд, пока палец на кнопке.
+ */
+@Composable
+private fun BackspaceKey(onBackspace: () -> Unit) {
+    val del by rememberUpdatedState(onBackspace)
+    val scope = rememberCoroutineScope()
+    val label = stringResource(R.string.emoji_backspace)
+    Box(
+        Modifier.size(44.dp).clip(RoundedCornerShape(Tokens.Radius.chip))
+            .semantics {
+                role = Role.Button
+                onClick(label) {
+                    del()
+                    true
+                }
+            }
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown()
+                    del()
+                    val repeat = scope.launch {
+                        delay(REPEAT_START_MS)
+                        while (true) {
+                            del()
+                            delay(REPEAT_EVERY_MS)
+                        }
+                    }
+                    waitForUpOrCancellation()
+                    repeat.cancel()
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.AutoMirrored.Filled.Backspace, label, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconM))
+    }
+}
+
+/** Пауза до автоповтора и шаг — как у системной клавиатуры. */
+private const val REPEAT_START_MS = 400L
+private const val REPEAT_EVERY_MS = 50L
 
 /** Поиск по словам (ru, en). Крестик очищает и снимает фокус — панель возвращается к сетке. */
 @Composable
