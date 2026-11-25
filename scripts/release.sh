@@ -105,10 +105,11 @@ EOF
 {
     git show "$commit:$CHANGELOG/en.json" | "$PY" scripts/changelog-notes.py "$ver"
     cat <<EOF
+
 ### Install
 
-Download \`$APK\` and open it on the phone. Updates install over the previous version; the
-app checks for them itself once a day if allowed.
+Download \`$APK\` and open it on the phone; it installs over earlier versions (same key).
+The app also checks for updates itself once a day if allowed.
 
 Signing certificate (SHA-256): \`$SIGN_CERT_SHA256\`
 EOF
