@@ -165,9 +165,14 @@ internal fun ContactsScreen(
     // чатами, а не занимают экран постоянно. Шапка и вкладки остаются на месте.
     val strips: @Composable () -> Unit = {
         QueueStrip(model, nav.openOutbox)
-        // Одна полоса за раз: копии важнее обновлений.
+        // Одна полоса за раз: копии ключа, потом работа в фоне, потом обновления.
         val backup = backupStripNow(model)
-        if (backup != null) BackupStripView(model, nav, backup) else UpdateStripView()
+        val bg = bgStripNow()
+        when {
+            backup != null -> BackupStripView(model, nav, backup)
+            bg != null -> BgStripView(bg)
+            else -> UpdateStripView()
+        }
         // Счётчик пиров переехал в шапку (PeerIndicator). Здесь — только бенч-замер
         // приёма, пока он активен (диагностика; запуск — долгим тапом по индикатору).
         if (model.benchRecv) {
@@ -619,6 +624,74 @@ private fun BackupStripView(model: AppModel, nav: HomeNav, strip: BackupStrip) {
 private fun backupStripNow(model: AppModel): BackupStrip? {
     val hasChats = model.chatSummaries.values.any { it.lastTime > 0 }
     return model.backupFacts.strip(System.currentTimeMillis() / 1000, hasChats)
+}
+
+/**
+ * Какая полоса «работа в фоне» видна (п. 50). Оптимизацию Android перечитываем при каждом
+ * возвращении на экран: её снимают в системных настройках, и полоса должна уйти сама.
+ */
+@Composable
+private fun bgStripNow(): BgStrip? {
+    val ctx = LocalContext.current
+    var resumed by remember { mutableIntStateOf(0) }
+    val owner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(owner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) resumed++
+        }
+        owner.lifecycle.addObserver(obs)
+        onDispose { owner.lifecycle.removeObserver(obs) }
+    }
+    val limited = remember(resumed) { !Background.ignoresBatteryOptimizations(ctx) }
+    val vendor = remember { Background.vendor(ctx) != null }
+    val autostart = remember { Autostart.intent(ctx) != null }
+    return Background.facts.strip(System.currentTimeMillis() / 1000, limited, vendor, autostart)
+}
+
+/**
+ * Полоса «работа в фоне» (app-ui.md → «Работа в фоне»): без неё прошивка или Android
+ * усыпляют узел, и сообщения приходят, только когда приложение открыто.
+ */
+@Composable
+private fun BgStripView(strip: BgStrip) {
+    val ctx = LocalContext.current
+    val later = stringResource(R.string.backup_later)
+    when (strip) {
+        BgStrip.ANDROID -> HomeStrip(
+            icon = TablerIcons.BatteryCharging,
+            title = stringResource(R.string.bg_strip_android),
+            text = stringResource(R.string.bg_strip_android_sub),
+            primary = stringResource(R.string.bg_strip_allow),
+            onPrimary = { runCatching { ctx.startActivity(Background.batteryOptimizationIntent(ctx).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } },
+            secondary = later,
+            onSecondary = Background::later,
+        )
+        BgStrip.VENDOR -> {
+            val vendor = remember { Background.vendor(ctx) } ?: return
+            val (title, desc) = vendorStrings(vendor)
+            HomeStrip(
+                icon = TablerIcons.BatteryCharging,
+                title = stringResource(title),
+                text = stringResource(desc),
+                primary = stringResource(R.string.onb_open),
+                onPrimary = { Background.openVendor(ctx, vendor) },
+                secondary = later,
+                onSecondary = Background::later,
+            )
+        }
+        BgStrip.AUTOSTART -> {
+            val intent = remember { Autostart.intent(ctx) } ?: return
+            HomeStrip(
+                icon = TablerIcons.Rocket,
+                title = stringResource(R.string.onb_perm_auto),
+                text = stringResource(R.string.onb_perm_auto_desc),
+                primary = stringResource(R.string.onb_open),
+                onPrimary = { Background.openAutostart(ctx, intent) },
+                secondary = later,
+                onSecondary = Background::later,
+            )
+        }
+    }
 }
 
 /**

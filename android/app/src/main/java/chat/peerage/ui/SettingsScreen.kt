@@ -562,37 +562,6 @@ internal fun SettingsNotificationsScreen(model: AppModel) {
                 ctx.startActivity(ConnService.channelSettings(ctx))
             }
         }
-        BackgroundSection(resumed)
-    }
-}
-
-/**
- * «Работа в фоне» (п. 50): уведомления приходят, только пока узел жив. Те же три строки,
- * что в онбординге, — для тех, кто его прошёл: оптимизация батареи Android (состояние
- * известно), батарея приложения в прошивке и автозапуск (состояние прошивка не говорит).
- */
-@Composable
-private fun BackgroundSection(resumed: Int) {
-    val ctx = LocalContext.current
-    val vendor = remember { Background.vendor(ctx) }
-    val autostart = remember { Autostart.intent(ctx) }
-    val free = remember(resumed) { Background.ignoresBatteryOptimizations(ctx) }
-    SectionTitle(stringResource(R.string.bg_section))
-    CardSection {
-        ExternalRow(
-            stringResource(R.string.bg_android),
-            stringResource(if (free) R.string.bg_android_free else R.string.bg_android_limited),
-            divider = false,
-        ) { runCatching { ctx.startActivity(Background.batteryOptimizationIntent(ctx).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }
-        if (vendor != null) {
-            val (title, desc) = vendorStrings(vendor)
-            ExternalRow(stringResource(title), stringResource(desc), divider = true) { Background.openVendor(ctx, vendor) }
-        }
-        if (autostart != null) {
-            ExternalRow(stringResource(R.string.onb_perm_auto), stringResource(R.string.onb_perm_auto_desc), divider = true) {
-                runCatching { ctx.startActivity(autostart) }
-            }
-        }
     }
 }
 

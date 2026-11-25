@@ -921,7 +921,7 @@ private fun PermissionsStep(onBack: () -> Unit, onDone: () -> Unit) {
             if (autostart != null) {
                 // Включён ли автозапуск, прошивка не говорит — кнопка остаётся.
                 PermRow(TablerIcons.Rocket, R.string.onb_perm_auto, R.string.onb_perm_auto_desc, first = false, granted = false, R.string.onb_open) {
-                    runCatching { ctx.startActivity(autostart) }
+                    Background.openAutostart(ctx, autostart)
                 }
             }
         }

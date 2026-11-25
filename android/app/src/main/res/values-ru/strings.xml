@@ -1429,10 +1429,9 @@
     <string name="update_rejected_sub">Файл не совпал с подписью приложения и удалён.</string>
 
     <!-- Работа в фоне (п. 50, app-ui.md → «Работа в фоне») -->
-    <string name="bg_section">Работа в фоне</string>
-    <string name="bg_android">Оптимизация батареи Android</string>
-    <string name="bg_android_free">Отключена</string>
-    <string name="bg_android_limited">Включена: Android усыпляет приложение в фоне</string>
+    <string name="bg_strip_android">Работа в фоне ограничена</string>
+    <string name="bg_strip_android_sub">Android усыпляет приложение: сообщения приходят с задержкой</string>
+    <string name="bg_strip_allow">Разрешить</string>
     <string name="bg_vendor_miui">Контроль активности</string>
     <string name="bg_vendor_miui_desc">Нужно «Нет ограничений»: иначе MIUI останавливает приложение в фоне</string>
     <string name="bg_vendor_app">Батарея приложения</string>
