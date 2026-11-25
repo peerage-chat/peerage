@@ -354,3 +354,32 @@ fn dm_calls_show_up_in_the_chat_feed() {
     let hits = json(&b.search_json("answered", None, 10));
     assert_eq!(hits.as_array().map(|a| a.len()), Some(0), "{hits}");
 }
+
+/// П. 56: B принял, звонивший A ушёл первым. Клиент B, видя, что A в комнате уже нет,
+/// выходит так же, как из недозвона: отмена дозвона + выход. Принятый звонок от этого
+/// отклонённым не становится — он отвеченный, с длительностью.
+#[test]
+fn answered_call_left_by_caller_stays_answered() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(93), id(94));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let a = start(&net, a_id, tmpdir("a-left"));
+    let b = start(&net, b_id, tmpdir("b-left"));
+    a.add_contact(&b_key, "B");
+    b.add_contact(&a_key, "A");
+
+    let a_room = a.room_invite_dm(b_key, true, false);
+    assert!(next_room_invite(&b, 8).is_some(), "звонок дошёл");
+    let room = b.room_join_dm(a_key, true, false);
+    std::thread::sleep(Duration::from_millis(1200));
+    a.room_leave(a_room);
+
+    b.room_decline_dm(a_key);
+    b.room_leave(room);
+    let row = call_row(&b, &a_key);
+    assert_eq!(row["text"], "answered", "принятый — не отклонённый: {row}");
+    assert!(
+        row["duration_ms"].as_i64().unwrap_or(0) >= 1000,
+        "длительность разговора: {row}"
+    );
+}

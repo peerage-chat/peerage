@@ -3202,19 +3202,28 @@ impl Engine {
         self.decline_incoming();
     }
 
-    /// Пометить текущий ВХОДЯЩИЙ звонок отклонённым и закрыть его.
+    /// Пометить текущий ВХОДЯЩИЙ звонок отклонённым и закрыть его. Уже принятый —
+    /// не трогать (п. 56): клиент шлёт отмену и тогда, когда выходит из разговора,
+    /// который звонивший покинул первым; запись остаётся отвеченной, длительность
+    /// проставит выход из комнаты.
     fn decline_incoming(&self) {
         let id = {
             let mut ac = self.active_call.lock_safe();
-            let id = ac.as_ref().filter(|c| c.incoming).map(|c| c.id);
-            if id.is_some() {
-                *ac = None;
+            let Some(id) = ac.as_ref().filter(|c| c.incoming).map(|c| c.id) else {
+                return;
+            };
+            let answered = self
+                .calls
+                .lock_safe()
+                .get(id)
+                .is_some_and(|c| c.outcome == "answered");
+            if answered {
+                return;
             }
+            *ac = None;
             id
         };
-        if let Some(id) = id {
-            self.call_outcome(id, "declined");
-        }
+        self.call_outcome(id, "declined");
     }
 
     /// Принять DM-звонок: войти в комнату с регистрацией dm_peer. Возвращает room_id.
