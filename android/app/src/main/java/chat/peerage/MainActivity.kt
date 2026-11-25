@@ -359,6 +359,9 @@ internal enum class Screen {
     /** Политика конфиденциальности — из «О приложении». */
     Policy,
 
+    /** Порядок закреплённых чатов (п. 67). */
+    PinnedOrder,
+
     /** Куда переслать (п. 57): главный список в режиме выбора. */
     ForwardPick,
 }
@@ -635,6 +638,7 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
                             Screen.SettingsAbout -> {}
                             Screen.WhatsNew -> TopBar(stringResource(R.string.whatsnew_title), onBack = goBack)
                             Screen.Policy -> TopBar(stringResource(R.string.policy_title), onBack = goBack)
+                            Screen.PinnedOrder -> TopBar(stringResource(R.string.pinned_order_title), onBack = goBack)
                             Screen.Scanner -> TopBar(stringResource(R.string.title_verify_qr), onBack = goBack)
                             Screen.ContactList -> TopBar(stringResource(R.string.menu_contacts), onBack = goBack) {
                                 BarIcon(TablerIcons.Search, stringResource(R.string.cd_search)) {
@@ -725,6 +729,7 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
                                             keyFlow = openKeyFlow,
                                             dataBackup = { home(Screen.Backup) },
                                             whatsNew = { home(Screen.WhatsNew) },
+                                            pinnedOrder = { home(Screen.PinnedOrder) },
                                         ),
                                     )
                                 }
@@ -883,6 +888,7 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
                                 )
                                 Screen.WhatsNew -> WhatsNewScreen()
                                 Screen.Policy -> PolicyScreen()
+                                Screen.PinnedOrder -> PinnedOrderScreen(model)
                                 Screen.ContactList -> ContactListScreen(
                                     model,
                                     query = contactQuery,

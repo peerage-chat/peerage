@@ -238,6 +238,7 @@ internal fun ContactsScreen(
                     // всю ширину: он и разделяет группы, и не оставляет дыры.
                     fullDivider = i > 0 && rows[i - 1].pinned && !r.pinned,
                     withMenu = !nav.pick,
+                    onReorder = nav.pinnedOrder,
                     onClick = { if (r.group) nav.openGroup(r.id) else nav.openDm(r.id) },
                 )
             }
@@ -269,6 +270,7 @@ private fun ChatListRow(
     first: Boolean,
     fullDivider: Boolean,
     withMenu: Boolean = true,
+    onReorder: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -378,7 +380,7 @@ private fun ChatListRow(
                     }
                 }
             }
-            ChatRowMenu(model, row, menu) { menu = false }
+            ChatRowMenu(model, row, menu, onReorder) { menu = false }
         }
     }
 }
@@ -446,7 +448,7 @@ private fun ChatRowBadge(model: AppModel, row: ChatRowUi) {
 /** Меню чата по долгому нажатию: закрепить и уведомления. Действий больше двух, и они
  *  разной цены — поэтому меню, а не свайп по строке (горизонталь отдана папкам). */
 @Composable
-private fun ChatRowMenu(model: AppModel, row: ChatRowUi, open: Boolean, onClose: () -> Unit) {
+private fun ChatRowMenu(model: AppModel, row: ChatRowUi, open: Boolean, onReorder: () -> Unit, onClose: () -> Unit) {
     val chat = ChatTarget(row.id, row.group)
     var notify by remember(chat) { mutableStateOf(false) }
     if (notify) NotifySheet(model, chat) { notify = false }
@@ -457,6 +459,14 @@ private fun ChatRowMenu(model: AppModel, row: ChatRowUi, open: Boolean, onClose:
         ) {
             model.pinChat(row.id, row.group, !row.pinned)
             onClose()
+        }
+        // Порядок закреплённых (п. 67) — отдельным экраном с ручками: долгое нажатие здесь
+        // уже занято меню, а горизонталь — папками.
+        if (row.pinned && model.chatSummaries.values.count { it.pinned } > 1) {
+            PopMenuItem(TablerIcons.ArrowsSort, stringResource(R.string.chat_menu_reorder)) {
+                onClose()
+                onReorder()
+            }
         }
         // Режим виден справа; выбор и срок — в шторке. Себе уведомлений не приходит.
         if (!row.saved) {
@@ -530,6 +540,8 @@ internal class HomeNav(
      * можно написать; без полос, запросов и меню строки. Тап — [openDm]/[openGroup].
      */
     val pick: Boolean = false,
+    /** Порядок закреплённых (п. 67) — из меню закреплённого чата. */
+    val pinnedOrder: () -> Unit = {},
 )
 
 /**

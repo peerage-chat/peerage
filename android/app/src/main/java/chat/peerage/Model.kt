@@ -3234,6 +3234,13 @@ class AppModel private constructor() {
         refreshChatSummariesNow()
     }
 
+    /** Переставить закреплённые (п. 67): [order] — сверху вниз; пометка локальная. */
+    fun reorderPinned(order: List<ChatTarget>) = ops.execute {
+        val json = order.joinToString(",", "[", "]") { """{"id":"${it.id}","group":${it.group}}""" }
+        Native.reorderPinnedChats(sessionPtr, json)
+        refreshChatSummariesNow()
+    }
+
     /** Умолчание чата: у группы — от админа, у личного — все сообщения. */
     fun notifyDefault(id: String, group: Boolean): NotifyMode =
         if (group) groups.firstOrNull { it.gid == id }?.notifyDefault ?: NotifyMode.All else NotifyMode.All

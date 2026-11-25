@@ -1897,6 +1897,39 @@ impl MessageStore {
         Ok(())
     }
 
+    /// Переставить закреплённые чаты (п. 67): `order` — сверху вниз. Метка закрепа — ключ
+    /// сортировки списка — переписывается строго убывающей от самой поздней из меток этих
+    /// чатов: порядок задан, а новый закреп (сейчас) по-прежнему встаёт выше. Незакреплённый
+    /// в `order` пропускается — перестановка не закрепляет.
+    pub fn reorder_pinned_chats(&self, order: &[Chat]) -> Result<(), StoreError> {
+        use rusqlite::OptionalExtension;
+        let mut conn = db::lock(&self.db);
+        let tx = conn.transaction()?;
+        let mut pinned = Vec::with_capacity(order.len());
+        for chat in order {
+            let at: Option<i64> = tx
+                .query_row(
+                    "SELECT pinned_at FROM chat_flags WHERE chat = ?1 AND scope = ?2",
+                    rusqlite::params![chat.id(), chat.scope()],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(at) = at.filter(|&at| at != 0) {
+                pinned.push((chat, at));
+            }
+        }
+        if let Some(top) = pinned.iter().map(|p| p.1).max() {
+            for (i, (chat, _)) in pinned.iter().enumerate() {
+                tx.execute(
+                    "UPDATE chat_flags SET pinned_at = ?3 WHERE chat = ?1 AND scope = ?2",
+                    rusqlite::params![chat.id(), chat.scope(), top - i as i64],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Свой режим уведомлений чата (`None` — вернуть к умолчанию).
     pub fn set_chat_notify(&self, chat: Chat, notify: Option<ChatNotify>) -> Result<(), StoreError> {
         let (mode, until) = notify.map_or((-1, 0), |n| (n.mode.code(), n.until));
@@ -2515,6 +2548,29 @@ mod tests {
         store.set_chat_notify(Chat::Dm(&c), None).unwrap();
         assert_eq!(store.summaries()[0].notify, None, "вернули к умолчанию");
         assert!(!store.chat_flags().iter().any(|f| f.0 == c.to_vec()));
+    }
+
+    /// Порядок закреплённых чатов (п. 67): переставленные получают строго убывающие метки
+    /// закрепа от самой поздней — список сортирует по ним; незакреплённый в порядке
+    /// пропускается; повтор того же порядка ничего не меняет.
+    #[test]
+    fn pinned_chats_are_reordered() {
+        let store = MessageStore::open(db());
+        let (a, b, c, loose) = (key(), key(), key(), key());
+        store.set_chat_pinned(Chat::Dm(&a), 10).unwrap();
+        store.set_chat_pinned(Chat::Dm(&b), 20).unwrap();
+        store.set_chat_pinned(Chat::Group(&c), 20).unwrap(); // закреплён в ту же секунду
+        let pins = |s: &MessageStore| {
+            let mut v: Vec<_> = s.chat_flags().into_iter().filter(|f| f.2 != 0).map(|f| (f.0, f.2)).collect();
+            v.sort_by_key(|p| std::cmp::Reverse(p.1));
+            v
+        };
+        let order = [Chat::Group(&c), Chat::Dm(&a), Chat::Dm(&loose), Chat::Dm(&b)];
+        store.reorder_pinned_chats(&order).unwrap();
+        let want = vec![(c.to_vec(), 20), (a.to_vec(), 19), (b.to_vec(), 18)];
+        assert_eq!(pins(&store), want, "сверху вниз — как в порядке; незакреплённый не закрепился");
+        store.reorder_pinned_chats(&order).unwrap();
+        assert_eq!(pins(&store), want, "повтор — тот же итог");
     }
 
     /// Строка реакции в списке чатов (beta.md 7f): по чату — последняя чужая реакция на моё

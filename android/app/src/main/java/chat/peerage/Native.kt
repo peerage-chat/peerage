@@ -230,6 +230,9 @@ object Native {
      *  привязкой к текущему адресу (иначе по коду до нас не достучатся). */
     external fun myContactCode(sessionPtr: Long): String
 
+    /** Порядок закреплённых (п. 67): `[{"id":"hex","group":false}, …]` сверху вниз. */
+    external fun reorderPinnedChats(sessionPtr: Long, orderJson: String)
+
     /** Код обмена контакта (п. 66): его личность и подписанный адрес; "" — не контакт. */
     external fun contactCode(sessionPtr: Long, keyHex: String): String
 

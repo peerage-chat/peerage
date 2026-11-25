@@ -1386,6 +1386,35 @@ pub extern "system" fn Java_chat_peerage_Native_myContactCode<'local>(
     })
 }
 
+/// Порядок закреплённых чатов (п. 67): `orderJson` — `[{"id":"hex","group":false}, …]`
+/// сверху вниз. Битые элементы пропускаются.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_reorderPinnedChats<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    order_json: JString<'local>,
+) {
+    jni_safe!((), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return };
+        let raw: serde_json::Value =
+            serde_json::from_str(&jstr(&mut env, &order_json)).unwrap_or(serde_json::Value::Null);
+        let order: Vec<peerage_engine::ChatKey> = raw
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| {
+                        let id = v.get("id")?.as_str()?;
+                        let group = v.get("group").and_then(|g| g.as_bool()).unwrap_or(false);
+                        peerage_engine::ChatKey::parse(id, group)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        e.reorder_pinned_chats(&order);
+    })
+}
+
 /// Код обмена контакта для «Поделиться контактом» (п. 66); "" — не контакт.
 #[no_mangle]
 pub extern "system" fn Java_chat_peerage_Native_contactCode<'local>(

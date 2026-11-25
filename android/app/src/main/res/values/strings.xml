@@ -1378,4 +1378,12 @@
     <string name="policy_title">Privacy policy</string>
     <string name="about_no_warranty">No warranty: GPL-3.0, sections 15–16</string>
     <string name="onb_policy">Privacy policy</string>
+
+    <!-- Порядок закреплённых чатов (п. 67) -->
+    <string name="chat_menu_reorder">Reorder</string>
+    <string name="pinned_order_title">Pinned order</string>
+    <string name="pinned_order_hint">Drag by the handle on the right. The order applies to all folders.</string>
+    <string name="pinned_order_up">Move up</string>
+    <string name="pinned_order_down">Move down</string>
+    <string name="cd_drag_handle">Drag to reorder</string>
 </resources>

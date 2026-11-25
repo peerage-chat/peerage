@@ -692,3 +692,19 @@ val TablerIcons.WifiOff: ImageVector by lazy {
 val TablerIcons.SwitchHorizontal: ImageVector by lazy {
     tabler("switch-horizontal", "M4 8h13l-3 -3M20 16h-13l3 3")
 }
+
+val TablerIcons.ArrowsSort: ImageVector by lazy {
+    tabler("arrows-sort", "M3 9l4 -4l4 4m-4 -4v14", "M21 15l-4 4l-4 -4m4 4v-14")
+}
+
+val TablerIcons.GripVertical: ImageVector by lazy {
+    tabler(
+        "grip-vertical",
+        "M8 5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0",
+        "M8 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0",
+        "M8 19a1 1 0 1 0 2 0a1 1 0 1 0 -2 0",
+        "M14 5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0",
+        "M14 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0",
+        "M14 19a1 1 0 1 0 2 0a1 1 0 1 0 -2 0",
+    )
+}

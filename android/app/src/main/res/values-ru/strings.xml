@@ -1458,4 +1458,12 @@
     <string name="policy_title">Политика конфиденциальности</string>
     <string name="about_no_warranty">Без гарантий: GPL-3.0, разделы 15–16</string>
     <string name="onb_policy">Политика конфиденциальности</string>
+
+    <!-- Порядок закреплённых чатов (п. 67) -->
+    <string name="chat_menu_reorder">Изменить порядок</string>
+    <string name="pinned_order_title">Порядок закреплённых</string>
+    <string name="pinned_order_hint">Перетаскивание — за ручку справа. Порядок общий для всех папок.</string>
+    <string name="pinned_order_up">Выше</string>
+    <string name="pinned_order_down">Ниже</string>
+    <string name="cd_drag_handle">Перетащить</string>
 </resources>

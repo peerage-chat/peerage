@@ -1066,6 +1066,14 @@ impl Engine {
         let _ = store.set_chat_pinned(chat.as_chat(), if on { now() } else { 0 });
     }
 
+    /// Переставить закреплённые чаты (п. 67), `order` — сверху вниз; тоже локально.
+    /// Незакреплённые в порядке пропускаются.
+    pub fn reorder_pinned_chats(&self, order: &[ChatKey]) {
+        let store = self.messages.lock_safe();
+        let chats: Vec<_> = order.iter().map(ChatKey::as_chat).collect();
+        let _ = store.reorder_pinned_chats(&chats);
+    }
+
     /// Свой режим уведомлений чата (тоже локально): `None` — вернуть к умолчанию,
     /// `until` — до какого времени (с; 0 — пока не вернут). Решение «звенеть ли»
     /// принимает клиент по режиму, сроку и умолчанию группы.
