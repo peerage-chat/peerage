@@ -869,9 +869,16 @@ internal fun appVersion(): String {
     }
 }
 
-/** Время сообщения «ЧЧ:ММ» (time — unix-секунды). */
-internal fun fmtMsgTime(ts: Long): String =
-    java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ts * 1000))
+/**
+ * Часы «14:20» или «2:20 PM» — по настройке телефона (12/24 ч), один формат во всём
+ * приложении: пузырь, список, звонки, поиск, меню, просмотрщик (time — unix-секунды).
+ */
+internal fun fmtMsgTime(ts: Long): String = clockFormat().format(java.util.Date(ts * 1000))
+
+/** Формат часов телефона; до старта модели (нет контекста) — 24 ч. */
+internal fun clockFormat(): java.text.DateFormat =
+    AppModel.instance.appContext?.let { android.text.format.DateFormat.getTimeFormat(it) }
+        ?: java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
 
 /**
  * Время в строке списка чатов: сегодня — «ЧЧ:ММ», вчера — «вчера», на этой неделе —

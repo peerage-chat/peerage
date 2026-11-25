@@ -240,7 +240,7 @@ private fun statusLine(mine: Boolean, status: String, time: Long): String {
 private fun shortWhen(time: Long): String {
     val ctx = LocalContext.current
     val date = java.util.Date(time * 1000)
-    val clock = android.text.format.DateFormat.getTimeFormat(ctx).format(date)
+    val clock = fmtMsgTime(time)
     val nowSec = System.currentTimeMillis() / 1000
     return when (dayKey(time)) {
         dayKey(nowSec) -> stringResource(R.string.act_today, clock)

@@ -2149,8 +2149,8 @@ class AppModel private constructor() {
                 }
                 CopyText.Entry(author, m.time, if (m.text.isNotEmpty()) plainText(m) else m.name)
             }
-        val fmt = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
-        return CopyText.format(entries) { t -> fmt.format(java.util.Date(t * 1000)) }
+        val day = java.text.DateFormat.getDateInstance(java.text.DateFormat.SHORT)
+        return CopyText.format(entries) { t -> day.format(java.util.Date(t * 1000)) + " " + chat.peerage.ui.fmtMsgTime(t) }
     }
 
     fun selectedText(key: String): String = selectedTextOf(key)

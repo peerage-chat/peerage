@@ -212,7 +212,7 @@ private fun CallRow(
                 Text(outcomeLabel(e, isRoom), color = Tokens.Colors.tertiary, fontSize = Tokens.Font.body, maxLines = 1)
             }
         }
-        Text(fmtClock(e.started), color = Tokens.Colors.tertiary, fontSize = Tokens.Font.small)
+        Text(fmtMsgTime(e.started), color = Tokens.Colors.tertiary, fontSize = Tokens.Font.small)
         // Группы больше нет — войти некуда; не-контакту звонок не дойдёт (гейт запросов).
         // В обоих случаях кнопки нет, но место под неё держим — время стоит по одной вертикали.
         val action: (() -> Unit)? = when {
@@ -252,10 +252,6 @@ private fun outcomeLabel(e: CallEntry, isRoom: Boolean): String {
         else -> stringResource(R.string.calls_outgoing, dur)
     }
 }
-
-/** Время звонка «14:20»: день уже сказан заголовком над строками. */
-private fun fmtClock(ts: Long): String =
-    java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ts * 1000))
 
 /** «4:07» / «1:02:15» — час с лишним в комнате не должен читаться как «62:15». */
 internal fun fmtCallDuration(sec: Long): String =

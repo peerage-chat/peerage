@@ -844,7 +844,7 @@ private fun VideoBar(muted: Boolean, onMute: (Boolean) -> Unit) {
 private fun fmtViewerDate(time: Long): String {
     val ms = time * 1000
     val ctx = LocalContext.current
-    val clock = android.text.format.DateFormat.getTimeFormat(ctx).format(java.util.Date(ms))
+    val clock = fmtMsgTime(time)
     return if (android.text.format.DateUtils.isToday(ms)) {
         stringResource(R.string.viewer_today, clock)
     } else {

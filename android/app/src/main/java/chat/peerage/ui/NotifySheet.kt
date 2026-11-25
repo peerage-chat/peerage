@@ -38,9 +38,9 @@ private fun untilLabel(untilSec: Long): String {
     val at = Date(untilSec * 1000)
     val sameDay = DateFormat.getDateInstance().format(at) == DateFormat.getDateInstance().format(Date())
     val text = if (sameDay) {
-        DateFormat.getTimeInstance(DateFormat.SHORT).format(at)
+        clockFormat().format(at)
     } else {
-        DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(at)
+        DateFormat.getDateInstance(DateFormat.MEDIUM).format(at) + ", " + clockFormat().format(at)
     }
     return stringResource(R.string.notif_until, text)
 }

@@ -290,7 +290,7 @@ private fun hitDay(ts: Long): String {
     val nowSec = System.currentTimeMillis() / 1000
     val date = java.util.Date(ts * 1000)
     return when (dayKey(ts)) {
-        dayKey(nowSec) -> java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(date)
+        dayKey(nowSec) -> fmtMsgTime(ts)
         dayKey(nowSec - 86_400) -> stringResource(R.string.search_yesterday)
         else -> if (yearOf(ts) == yearOf(nowSec)) {
             java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault()).format(date).trimEnd('.')
