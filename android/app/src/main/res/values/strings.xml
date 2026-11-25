@@ -1373,4 +1373,9 @@
     <string name="forward_author_title">Forwarded from</string>
     <string name="forward_author_stranger">Not in contacts</string>
     <string name="forward_author_copy">Copy key</string>
+
+    <!-- Политика конфиденциальности -->
+    <string name="policy_title">Privacy policy</string>
+    <string name="about_no_warranty">No warranty: GPL-3.0, sections 15–16</string>
+    <string name="onb_policy">Privacy policy</string>
 </resources>

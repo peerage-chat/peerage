@@ -1453,4 +1453,9 @@
     <string name="forward_author_title">Автор пересланного</string>
     <string name="forward_author_stranger">Не из контактов</string>
     <string name="forward_author_copy">Копировать ключ</string>
+
+    <!-- Политика конфиденциальности -->
+    <string name="policy_title">Политика конфиденциальности</string>
+    <string name="about_no_warranty">Без гарантий: GPL-3.0, разделы 15–16</string>
+    <string name="onb_policy">Политика конфиденциальности</string>
 </resources>

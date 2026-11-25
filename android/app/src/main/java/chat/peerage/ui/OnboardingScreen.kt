@@ -661,6 +661,16 @@ internal fun OnbCaption(text: String, modifier: Modifier = Modifier) {
 /** Приветствие (`onboard/Main`): знак, имя, обещания без «мы», два входа. */
 @Composable
 private fun WelcomeStep(onStart: () -> Unit, onImport: () -> Unit) {
+    // Политика — до первого шага: что видят другие, ещё до создания личности.
+    var policy by rememberSaveable { mutableStateOf(false) }
+    if (policy) {
+        BackHandler { policy = false }
+        Column(Modifier.fillMaxSize().background(Tokens.Colors.bg)) {
+            TopBar(stringResource(R.string.policy_title), onBack = { policy = false })
+            PolicyScreen()
+        }
+        return
+    }
     Column(Modifier.fillMaxSize().background(Tokens.Colors.bg)) {
         Column(
             Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
@@ -694,7 +704,14 @@ private fun WelcomeStep(onStart: () -> Unit, onImport: () -> Unit) {
                     color = Tokens.Colors.tertiary,
                     fontSize = Tokens.Font.body,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(bottom = Tokens.Space.s),
+                )
+                Text(
+                    stringResource(R.string.onb_policy),
+                    color = Tokens.Colors.accent,
+                    fontSize = Tokens.Font.body,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.clickable(role = Role.Button) { policy = true }
+                        .padding(vertical = Tokens.Space.xs),
                 )
             },
         )

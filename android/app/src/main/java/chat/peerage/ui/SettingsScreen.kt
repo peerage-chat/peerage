@@ -595,7 +595,7 @@ private fun channelState(ctx: android.content.Context, id: String): String {
  * шифрование, лицензия; «Сохранить лог». Шапка своя: знак стоит на фоне, не на панели.
  */
 @Composable
-internal fun SettingsAboutScreen(onBack: () -> Unit, onWhatsNew: () -> Unit) {
+internal fun SettingsAboutScreen(onBack: () -> Unit, onWhatsNew: () -> Unit, onPolicy: () -> Unit) {
     val ctx = LocalContext.current
     // Сохранить лог: человек выбирает, куда положить файл, и сам его пересылает.
     val saveLog = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
@@ -658,8 +658,17 @@ internal fun SettingsAboutScreen(onBack: () -> Unit, onWhatsNew: () -> Unit) {
                 ValueRow(stringResource(R.string.settings_encryption_label), stringResource(R.string.settings_encryption_value))
                 ValueRow(stringResource(R.string.settings_license_label), "GPL-3.0")
             }
+            // Отказ от гарантий — сама лицензия (GPL-3.0, разделы 15–16); отдельных условий
+            // использования нет: сервиса, который ими регулировать, тоже нет.
+            Text(
+                stringResource(R.string.about_no_warranty),
+                color = Tokens.Colors.tertiary,
+                fontSize = Tokens.Font.body,
+                modifier = Modifier.padding(horizontal = Tokens.Space.xl),
+            )
             CardSection {
                 ValueRow(stringResource(R.string.whatsnew_title), appVersionName(), divider = false, chevron = true, onClick = onWhatsNew)
+                ValueRow(stringResource(R.string.policy_title), "", chevron = true, onClick = onPolicy)
             }
             UpdatesCard()
             CardSection {

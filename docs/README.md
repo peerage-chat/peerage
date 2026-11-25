@@ -19,6 +19,7 @@ picture, and **[project-state.md](project-state.md)** for what actually works to
 | **Scope and order of work** | [v1.0-scope.md](v1.0-scope.md), [completion-plan.md](completion-plan.md), [ROADMAP.md](ROADMAP.md) (Russian) |
 | **UI** | [design/app-ui.md](design/app-ui.md) (language, source of truth), [design/call-ui.md](design/call-ui.md) (calls), [design/tokens.md](design/tokens.md) (colours, spacing) — Russian |
 | **Plans** | [plans/media-webrtc-parity.md](plans/media-webrtc-parity.md), [plans/security-hardening.md](plans/security-hardening.md), [plans/play-store.md](plans/play-store.md) (Russian) |
+| **Privacy policy** | [privacy.en.md](../android/app/src/main/assets/legal/privacy.en.md), [privacy.ru.md](../android/app/src/main/assets/legal/privacy.ru.md) — shown in the app (About, onboarding) |
 | **Known bugs** | [BUGS.md](BUGS.md) (Russian) |
 | **History** | [archive/](archive/) |
 

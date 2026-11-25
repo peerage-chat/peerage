@@ -356,6 +356,9 @@ internal enum class Screen {
     SettingsAbout,
     WhatsNew,
 
+    /** Политика конфиденциальности — из «О приложении». */
+    Policy,
+
     /** Куда переслать (п. 57): главный список в режиме выбора. */
     ForwardPick,
 }
@@ -631,6 +634,7 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
                             Screen.SettingsNotifications -> TopBar(stringResource(R.string.settings_cat_notifications), onBack = goBack)
                             Screen.SettingsAbout -> {}
                             Screen.WhatsNew -> TopBar(stringResource(R.string.whatsnew_title), onBack = goBack)
+                            Screen.Policy -> TopBar(stringResource(R.string.policy_title), onBack = goBack)
                             Screen.Scanner -> TopBar(stringResource(R.string.title_verify_qr), onBack = goBack)
                             Screen.ContactList -> TopBar(stringResource(R.string.menu_contacts), onBack = goBack) {
                                 BarIcon(TablerIcons.Search, stringResource(R.string.cd_search)) {
@@ -872,8 +876,13 @@ private fun Shell(model: AppModel, twoPane: Boolean) {
                                 Screen.SettingsMedia -> SettingsMediaScreen(model) { screen = Screen.VideoQuality }
                                 Screen.VideoQuality -> SettingsVideoQualityScreen(model)
                                 Screen.SettingsNotifications -> SettingsNotificationsScreen(model)
-                                Screen.SettingsAbout -> SettingsAboutScreen(onBack = goBack) { screen = Screen.WhatsNew }
+                                Screen.SettingsAbout -> SettingsAboutScreen(
+                                    onBack = goBack,
+                                    onWhatsNew = { screen = Screen.WhatsNew },
+                                    onPolicy = { screen = Screen.Policy },
+                                )
                                 Screen.WhatsNew -> WhatsNewScreen()
+                                Screen.Policy -> PolicyScreen()
                                 Screen.ContactList -> ContactListScreen(
                                     model,
                                     query = contactQuery,
