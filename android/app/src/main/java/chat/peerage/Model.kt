@@ -369,10 +369,17 @@ class AppModel private constructor() {
     /**
      * Статус человека для точки и подписи: «в сети» → «на связи» → «не в сети». ЕДИНСТВЕННЫЙ
      * источник присутствия человека в интерфейсе: личный чат, лента и состав группы, списки
-     * людей — все спрашивают здесь (п. 26). Себя я вижу «в сети», пока есть сеть.
+     * людей — все спрашивают здесь (п. 26). Себя — как видят другие: «в сети», пока есть сеть и
+     * статус не скрыт.
      */
     fun presence(key: String): Presence = when {
-        key == me?.pubkey -> if (offline) Presence.Offline else Presence.InApp
+        // Себя — так, как видят другие (п. 72): скрыл «в сети» — у них я «на связи», и у
+        // себя (счётчик группы, свой профиль) не «в сети», иначе выключение будто не работает.
+        key == me?.pubkey -> when {
+            offline -> Presence.Offline
+            privacy.inApp -> Presence.InApp
+            else -> Presence.Reachable
+        }
         online[key] != true -> Presence.Offline
         inApp[key] == true -> Presence.InApp
         else -> Presence.Reachable
