@@ -2034,14 +2034,16 @@ class AppModel private constructor() {
                 reply?.mine ?: false,
             )
             if (id >= 0) {
-                // "pending" — Rust подтверждение ещё не пришло; сменится на "delivered" по ACK.
+                // Статус — тот же, что записал движок (п. 71): ✓ получатель на связи, ☁ — нет;
+                // "delivered" — по ACK. Часы здесь давали лишний шаг ⏱ → ✓ → ☁.
+                val status = Native.firstStatus(sessionPtr, key)
                 log(key).add(
                     Message(
                         id,
                         text,
                         mine = true,
                         time = now,
-                        status = "pending",
+                        status = status,
                         replyTo = reply?.id ?: 0,
                         sender = me?.pubkey.orEmpty(),
                         replySender = replyAuthor(key, reply),

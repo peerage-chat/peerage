@@ -1973,6 +1973,21 @@ pub extern "system" fn Java_chat_peerage_Native_isOnline<'local>(
     })
 }
 
+/// Статус своего личного сообщения в момент отправки (п. 71): "sent" | "queued".
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_firstStatus<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+) -> jstring {
+    jni_safe!(ret(&env, "sent"), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "sent") };
+        let status = parse_key(&jstr(&mut env, &key_hex)).map_or("sent", |k| e.first_status(&k));
+        ret(&env, status)
+    })
+}
+
 // ── Сеть ────────────────────────────────────────────────────────────────────
 
 #[no_mangle]

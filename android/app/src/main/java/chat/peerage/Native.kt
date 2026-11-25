@@ -443,6 +443,9 @@ object Native {
     /** «Заблокированные»: JSON `[{key, name, contact, time}]`, новые сверху. */
     external fun blockedPeers(sessionPtr: Long): String
     external fun isOnline(sessionPtr: Long, keyHex: String): Boolean
+
+    /** Статус своего личного сообщения в момент отправки (п. 71): "sent" | "queued". */
+    external fun firstStatus(sessionPtr: Long, keyHex: String): String
     external fun netPeers(sessionPtr: Long): Int
     external fun netTree(sessionPtr: Long): Int
 

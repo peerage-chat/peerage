@@ -364,3 +364,26 @@ fn blink_longer_than_retries_still_delivers() {
     a.shutdown();
     b.shutdown();
 }
+
+/// П. 71: получатель не на связи — своё сообщение сразу «в очереди» (☁), а не «отправлено»
+/// (✓), которое потом, по истечении ретраев, сменялось бы на ☁. На связи — «отправлено».
+#[test]
+fn message_to_offline_peer_is_queued_at_once() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(91), id(92));
+    let b_key = b_id.public_key_bytes();
+    let (a, b, _) = pair(&net, (a_id, tmpdir("qa")), (b_id, tmpdir("qb")));
+
+    a.send_text(&b_key, "на связи").unwrap();
+    assert_eq!(find(&a, &b_key, "на связи").unwrap()["status"], "sent");
+
+    b.shutdown();
+    drop(b);
+    assert!(
+        wait(10, || !a.is_online(&b_key)),
+        "отправитель заметил, что получатель пропал"
+    );
+    a.send_text(&b_key, "без связи").unwrap();
+    assert_eq!(find(&a, &b_key, "без связи").unwrap()["status"], "queued");
+    a.shutdown();
+}

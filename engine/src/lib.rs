@@ -733,7 +733,7 @@ impl Engine {
                         text: text.to_string(),
                         mine: true,
                         time: t,
-                        status: "sent".into(),
+                        status: self.first_status(key).into(),
                         sender: self.me_hex(),
                         reply_to,
                         reply_sender: self.reply_author(key, reply_to, reply_mine),
@@ -1494,12 +1494,12 @@ impl Engine {
         let _ = self.messages.lock_safe().append_live(
             Chat::Dm(key),
             &StoredMessage {
-                // "sent" — как у текста: отдано в сеть, доставка НЕ подтверждена
-                // (✓✓ появится только по Ack, ☁ — если ретраи выдохлись).
+                // Как у текста ([`Self::first_status`]): ✓ — отдано в сеть, ☁ — получатель
+                // не на связи; ✓✓ — только по Ack.
                 id,
                 mine: true,
                 time: now(),
-                status: "sent".into(),
+                status: self.first_status(key).into(),
                 sender: self.me_hex(),
                 fwd_from: info.fwd_from.clone(),
                 fwd_anon: info.fwd_anon,
@@ -2647,6 +2647,18 @@ impl Engine {
 
     pub fn is_online(&self, key: &[u8; 32]) -> bool {
         self.messenger.is_online(key)
+    }
+
+    /// Статус своего личного сообщения в момент отправки (п. 71): получатель на связи —
+    /// "sent" (✓, отдано в сеть), нет — сразу "queued" (☁, ждёт в офлайн-очереди). Раньше
+    /// всегда "sent", и ☁ появлялось только по истечении ретраев: ✓ → ☁ выглядело откатом.
+    /// Тем же клиент подписывает свою мгновенную строку в ленте до перечитывания истории.
+    pub fn first_status(&self, key: &[u8; 32]) -> &'static str {
+        if self.messenger.is_online(key) {
+            "sent"
+        } else {
+            "queued"
+        }
     }
 
     // — Сеть —
