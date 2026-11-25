@@ -1387,4 +1387,9 @@
     <string name="pinned_order_up">Move up</string>
     <string name="pinned_order_down">Move down</string>
     <string name="cd_drag_handle">Drag to reorder</string>
+
+    <!-- Шаг «Что видят контакты» в первом запуске (п. 74) -->
+    <string name="onb_privacy_title">What contacts see</string>
+    <string name="onb_privacy_sub">Everything is mutual: whatever is off here is not shown from others either.</string>
+    <string name="onb_privacy_hint">Can be changed later in Profile → Privacy.</string>
 </resources>

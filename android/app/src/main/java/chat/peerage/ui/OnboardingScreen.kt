@@ -79,7 +79,7 @@ internal fun SecureFlag() {
 }
 
 /** Шаги новой личности; [bar] — сколько отрезков полоски закрашено (0 — полоски нет). */
-private enum class OnbStep(val bar: Int) { Welcome(0), Profile(1), Key(2), Phrase(2), Check(2), Perms(3) }
+private enum class OnbStep(val bar: Int) { Welcome(0), Profile(1), Privacy(1), Key(2), Phrase(2), Check(2), Perms(3) }
 
 /** Пошаговый флоу первого запуска. `onFinish` — онбординг завершён (пометить флаг). */
 @Composable
@@ -92,7 +92,8 @@ internal fun OnboardingFlow(model: AppModel, onFinish: () -> Unit) {
         when {
             importing -> importing = false
             step == OnbStep.Profile -> step = OnbStep.Welcome
-            step == OnbStep.Key -> step = OnbStep.Profile
+            step == OnbStep.Privacy -> step = OnbStep.Profile
+            step == OnbStep.Key -> step = OnbStep.Privacy
             step == OnbStep.Phrase -> step = OnbStep.Key
             step == OnbStep.Check -> step = OnbStep.Phrase
             step == OnbStep.Perms -> step = OnbStep.Key
@@ -105,7 +106,8 @@ internal fun OnboardingFlow(model: AppModel, onFinish: () -> Unit) {
     }
     when (step) {
         OnbStep.Welcome -> WelcomeStep(onStart = { step = OnbStep.Profile }, onImport = { importing = true })
-        OnbStep.Profile -> ProfileStep(model, onBack = back) { step = OnbStep.Key }
+        OnbStep.Profile -> ProfileStep(model, onBack = back) { step = OnbStep.Privacy }
+        OnbStep.Privacy -> PrivacyStep(model, onBack = back) { step = OnbStep.Key }
         OnbStep.Key -> KeyIntroStep(onBack = back, onShow = { step = OnbStep.Phrase }, onLater = { step = OnbStep.Perms })
         OnbStep.Phrase -> PhraseStep(model, onBack = back, onLater = { step = OnbStep.Perms }) { step = OnbStep.Check }
         OnbStep.Check -> Column(Modifier.fillMaxSize().background(Tokens.Colors.bg)) {
@@ -741,6 +743,26 @@ internal fun ProfileStep(model: AppModel, onBack: (() -> Unit)?, bar: Int = OnbS
         OwnPhoto(model.selfAvatar, stringResource(R.string.onb_pick_photo), pickAvatar)
         FormInput(name, stringResource(R.string.onb_name), Modifier.fillMaxWidth()) { name = it }
         OnbCaption(stringResource(R.string.onb_profile_hint), Modifier.padding(top = Tokens.Space.s))
+    }
+}
+
+/**
+ * Что видят контакты (п. 74): те же три индикатора, что в «Приватности», — до первого
+ * сообщения, а не после. Всё взаимно; положения по умолчанию — как в настройках.
+ */
+@Composable
+private fun PrivacyStep(model: AppModel, onBack: () -> Unit, onNext: () -> Unit) {
+    OnbPage(
+        bar = OnbStep.Privacy.bar,
+        onBack = onBack,
+        title = stringResource(R.string.onb_privacy_title),
+        sub = stringResource(R.string.onb_privacy_sub),
+        primary = stringResource(R.string.onb_next),
+        onPrimary = onNext,
+    ) {
+        Spacer(Modifier.height(Tokens.Space.xl))
+        OnbGroup { PrivacyIndicators(model) }
+        OnbCaption(stringResource(R.string.onb_privacy_hint), Modifier.padding(top = Tokens.Space.s))
     }
 }
 

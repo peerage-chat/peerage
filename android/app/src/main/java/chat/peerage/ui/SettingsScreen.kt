@@ -111,29 +111,11 @@ internal fun SettingsSecurityScreen(
  */
 @Composable
 internal fun SettingsPrivacyScreen(model: AppModel, onBlocked: () -> Unit) {
-    val p = model.privacy
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = Tokens.Space.xxl),
     ) {
         SectionTitle(stringResource(R.string.privacy_optional))
-        CardSection {
-            PrivacySwitch(
-                stringResource(R.string.privacy_read),
-                stringResource(if (p.readReceipts) R.string.privacy_read_on else R.string.privacy_read_off),
-                p.readReceipts,
-                divider = false,
-            ) { model.setReadReceipts(it) }
-            PrivacySwitch(
-                stringResource(R.string.privacy_typing),
-                stringResource(if (p.typing) R.string.privacy_typing_on else R.string.privacy_typing_off),
-                p.typing,
-            ) { model.setTypingIndicator(it) }
-            PrivacySwitch(
-                stringResource(R.string.privacy_in_app),
-                stringResource(if (p.inApp) R.string.privacy_in_app_on else R.string.privacy_in_app_off),
-                p.inApp,
-            ) { model.setInAppStatus(it) }
-        }
+        CardSection { PrivacyIndicators(model) }
         SectionTitle(stringResource(R.string.privacy_not_sent))
         CardSection {
             PrivacyFact(TablerIcons.Check, Tokens.Colors.online, R.string.privacy_not_sent_what, R.string.privacy_not_sent_sub, divider = false)
@@ -172,6 +154,31 @@ internal fun SettingsPrivacyScreen(model: AppModel, onBlocked: () -> Unit) {
             )
         }
     }
+}
+
+/**
+ * Индикаторы «По выбору» — отчёты о прочтении, набор, «в сети». Одни и те же строки в
+ * «Приватности» и на шаге первого запуска (п. 74); рамку задаёт вызывающий.
+ */
+@Composable
+internal fun PrivacyIndicators(model: AppModel) {
+    val p = model.privacy
+    PrivacySwitch(
+        stringResource(R.string.privacy_read),
+        stringResource(if (p.readReceipts) R.string.privacy_read_on else R.string.privacy_read_off),
+        p.readReceipts,
+        divider = false,
+    ) { model.setReadReceipts(it) }
+    PrivacySwitch(
+        stringResource(R.string.privacy_typing),
+        stringResource(if (p.typing) R.string.privacy_typing_on else R.string.privacy_typing_off),
+        p.typing,
+    ) { model.setTypingIndicator(it) }
+    PrivacySwitch(
+        stringResource(R.string.privacy_in_app),
+        stringResource(if (p.inApp) R.string.privacy_in_app_on else R.string.privacy_in_app_off),
+        p.inApp,
+    ) { model.setInAppStatus(it) }
 }
 
 /** Переключатель «Приватности»: название и что значит текущее положение. */
