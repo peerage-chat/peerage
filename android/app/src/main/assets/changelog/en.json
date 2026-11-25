@@ -2,7 +2,7 @@
   "versions": [
     {
       "version": "0.4.1",
-      "date": "2026-11-25",
+      "date": "2026-11-26",
       "summary": "Albums, voice scrubbing, forwarding through the chat list, fixes after 0.4.0.",
       "new": [
         "Forwarding opens the chat list itself, with folders, as on the main screen",
@@ -18,7 +18,9 @@
         "Fast scrolling in the attachment panel gallery, with the photo’s month",
         "Edit time in the menu of an edited message",
         "Privacy indicators are set up at first launch",
-        "Copying several messages keeps each one’s author and time"
+        "Copying several messages keeps each one’s author and time",
+        "Message times follow the phone’s 12- or 24-hour setting",
+        "The online status is off by default; it can be turned on in Privacy"
       ],
       "fixed": [
         "An answered call the other person left first is no longer “declined”",
@@ -28,7 +30,9 @@
         "A new folder starts without “Direct” turned on; Saved can be added to a folder",
         "“Share contact” gives a code the contact can be added with",
         "A message to an offline recipient is marked “queued” right away",
-        "A hidden online status is no longer shown on one’s own profile either"
+        "A hidden online status is no longer shown on one’s own profile either; the chat list and profile show “Reachable”",
+        "An album is selected as a whole, by tap and by drag",
+        "A queued message is marked with a cloud in the chat list too"
       ]
     },
     {
