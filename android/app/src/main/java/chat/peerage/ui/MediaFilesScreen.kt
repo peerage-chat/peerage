@@ -46,10 +46,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import chat.peerage.*
 import chat.peerage.R
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -502,11 +500,6 @@ private fun rememberVoicePlayback(): VoicePlayback {
     return p
 }
 
-private const val VOICE_TICK_MS = 50L
-
-/** Столбиков в волне: длиннее запись — длиннее волна, но в разумных пределах. */
-private fun voiceBars(durationMs: Int) = (10 + durationMs / 2000).coerceIn(10, 30)
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun VoiceRow(model: AppModel, chat: ChatTarget, m: Message, locale: Locale, p: VoicePlayback, onLong: () -> Unit) {
@@ -521,6 +514,38 @@ private fun VoiceRow(model: AppModel, chat: ChatTarget, m: Message, locale: Loca
     // У голосовых, отправленных без длительности, она берётся из самого звука.
     val durationMs = m.durationMs.takeIf { it > 0 } ?: wave?.durationMs ?: 0
     val progress = model.downloads[m.blobId]
+
+    // С позиции [ms]: новый плеер этого голосового (прежний, чужой, отпускается).
+    fun startAt(ms: Int) {
+        val b = bytes ?: return
+        scope.launch {
+            p.release()
+            val np = prepareVoicePlayer(ctx, m.blobId, b) ?: return@launch
+            np.setOnCompletionListener {
+                p.playing = null
+                p.posMs = 0
+                it.seekTo(0)
+            }
+            p.player = np
+            p.blobId = m.blobId
+            if (ms > 0) np.seekTo(ms)
+            p.posMs = ms
+            np.start()
+            p.playing = key
+        }
+    }
+
+    // Перемотка по волне (п. 68): своё голосовое — сдвинуть позицию, другое — играть отсюда.
+    fun seek(f: Float) {
+        val ms = (f * durationMs).toInt()
+        val mp = p.player
+        if (p.blobId == m.blobId && mp != null) {
+            mp.seekTo(ms)
+            p.posMs = ms
+        } else {
+            startAt(ms)
+        }
+    }
     val toggle: () -> Unit = {
         val mp = p.player
         when {
@@ -533,30 +558,7 @@ private fun VoiceRow(model: AppModel, chat: ChatTarget, m: Message, locale: Loca
                 mp.start()
                 p.playing = key
             }
-            bytes != null -> scope.launch {
-                p.release()
-                // Файл и подготовка плеера — не на главном потоке; копия — в `viewer/`,
-                // откуда расшифрованное убирается на старте.
-                val np = withContext(Dispatchers.IO) {
-                    runCatching {
-                        val dir = java.io.File(ctx.cacheDir, "viewer").apply { mkdirs() }
-                        val f = java.io.File(dir, "voice_${m.blobId}.m4a").apply { writeBytes(bytes) }
-                        android.media.MediaPlayer().apply {
-                            setDataSource(f.absolutePath)
-                            prepare()
-                        }
-                    }.getOrNull()
-                } ?: return@launch
-                np.setOnCompletionListener {
-                    p.playing = null
-                    p.posMs = 0
-                    it.seekTo(0)
-                }
-                p.player = np
-                p.blobId = m.blobId
-                np.start()
-                p.playing = key
-            }
+            bytes != null -> startAt(0)
         }
     }
     Row(
@@ -583,7 +585,7 @@ private fun VoiceRow(model: AppModel, chat: ChatTarget, m: Message, locale: Loca
             } else {
                 0f
             }
-            VoiceBars(wave?.levels, bars, played)
+            VoiceBars(wave?.levels, bars, played, onSeek = if (ok && durationMs > 0) ::seek else null)
             val rest = listOf(senderLabel(model, m), shortDate(m.time, locale)).joinToString(" · ")
             Text(
                 buildAnnotatedString {
@@ -600,27 +602,6 @@ private fun VoiceRow(model: AppModel, chat: ChatTarget, m: Message, locale: Loca
                 color = Tokens.Colors.tertiary,
                 fontSize = Tokens.Font.small,
                 maxLines = 1,
-            )
-        }
-    }
-}
-
-/** Волна: столбики громкости; проигранная часть — акцентом. Пока не посчитана — ровная черта. */
-@Composable
-private fun VoiceBars(levels: FloatArray?, bars: Int, played: Float) {
-    Row(
-        Modifier.height(Tokens.Size.mediaWave),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xxs),
-    ) {
-        repeat(bars) { i ->
-            val level = levels?.getOrNull(i) ?: 0f
-            val h = Tokens.Size.waveMin + (Tokens.Size.mediaWave - Tokens.Size.waveMin) * level
-            val on = (i + 0.5f) / bars <= played
-            Box(
-                Modifier.width(Tokens.Size.waveBar).height(h)
-                    .clip(RoundedCornerShape(Tokens.Radius.thumb))
-                    .background(if (on) Tokens.Colors.accent else Tokens.Colors.waveIdle),
             )
         }
     }

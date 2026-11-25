@@ -1392,4 +1392,7 @@
     <string name="onb_privacy_title">What contacts see</string>
     <string name="onb_privacy_sub">Everything is mutual: whatever is off here is not shown from others either.</string>
     <string name="onb_privacy_hint">Can be changed later in Profile → Privacy.</string>
+
+    <!-- Перемотка голосового по волне (п. 68) -->
+    <string name="voice_seek">Playback position</string>
 </resources>

@@ -1472,4 +1472,7 @@
     <string name="onb_privacy_title">Что видят контакты</string>
     <string name="onb_privacy_sub">Всё взаимно: выключенное здесь не видно и у других.</string>
     <string name="onb_privacy_hint">Меняется потом в «Профиль → Приватность».</string>
+
+    <!-- Перемотка голосового по волне (п. 68) -->
+    <string name="voice_seek">Позиция воспроизведения</string>
 </resources>

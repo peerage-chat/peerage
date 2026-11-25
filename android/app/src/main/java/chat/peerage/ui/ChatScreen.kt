@@ -108,7 +108,6 @@ import chat.peerage.*
 import chat.peerage.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 @Composable
@@ -1810,25 +1809,69 @@ internal fun FileAttachment(
 }
 
 /**
- * Голосовое-вложение: play/pause + длительность (M2). Плеер на байтах блоба.
- *
- * Длительность берётся из сообщения: до первого проигрывания иначе стояло слово
- * «Голосовое». Байты присылает собеседник, поэтому плеер собирается под
- * `runCatching`: битый файл — это молчащая кнопка, а не падение приложения.
+ * Голосовое (и аудиофайл — тот же вид сообщения): play/pause, волна и время (M2, п. 68).
+ * Тап или протяжка по волне — перемотка; до первого запуска она готовит плеер с этой
+ * позиции. Длительность — из сообщения, иначе из самого звука. Байты присылает собеседник:
+ * битый файл — молчащая кнопка, а не падение приложения.
  */
 @Composable
 internal fun VoiceAttachment(bytes: ByteArray?, blobId: String, knownDurationMs: Int) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var playing by remember { mutableStateOf(false) }
-    var durationMs by remember(bytes) { mutableStateOf(knownDurationMs) }
+    var posMs by remember(blobId) { mutableIntStateOf(0) }
     val player = remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+    var preparing by remember { mutableStateOf(false) }
+    val bars = voiceBars(knownDurationMs)
+    val wave by rememberVoiceLevels(blobId, bytes, bars)
+    val durationMs = knownDurationMs.takeIf { it > 0 } ?: wave?.durationMs ?: player.value?.duration ?: 0
     DisposableEffect(bytes) {
         onDispose {
             player.value?.release()
             player.value = null
         }
     }
+    LaunchedEffect(playing) {
+        while (playing) {
+            player.value?.let { runCatching { posMs = it.currentPosition } }
+            kotlinx.coroutines.delay(VOICE_TICK_MS)
+        }
+    }
+
+    // Плеер готовится один раз, не на главном потоке; [start] — сразу играть, [at] — с какой позиции.
+    fun prepare(start: Boolean, at: Int) {
+        val b = bytes ?: return
+        if (preparing) return
+        preparing = true
+        scope.launch {
+            val np = prepareVoicePlayer(ctx, blobId, b)
+            preparing = false
+            np ?: return@launch
+            // Пузырь ушёл с экрана, пока плеер готовился, — onDispose про него не знает.
+            if (player.value != null) {
+                np.release()
+                return@launch
+            }
+            np.setOnCompletionListener {
+                playing = false
+                posMs = 0
+                it.seekTo(0)
+            }
+            if (at > 0) np.seekTo(at)
+            player.value = np
+            if (start) {
+                np.start()
+                playing = true
+            }
+        }
+    }
+
+    fun seek(f: Float) {
+        val ms = (f * durationMs).toInt()
+        posMs = ms
+        player.value?.seekTo(ms) ?: prepare(start = false, at = ms)
+    }
+
     Row(
         Modifier.padding(end = Tokens.Size.metaReserve).widthIn(min = 150.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1837,48 +1880,16 @@ internal fun VoiceAttachment(bytes: ByteArray?, blobId: String, knownDurationMs:
             Modifier.size(38.dp).clip(CircleShape).background(HoloAccent)
                 .clickable(enabled = bytes != null) {
                     val mp = player.value
-                    if (mp != null && mp.isPlaying) {
-                        mp.pause()
-                        playing = false
-                    } else if (mp != null) {
-                        mp.start()
-                        playing = true
-                    } else if (bytes != null) {
-                        // Файл и подготовка плеера — не на главном потоке. Имя — по
-                        // блобу: по размеру два разных голосовых одной длины писали в
-                        // один файл, и второе подменяло играющее первое.
-                        scope.launch(Dispatchers.IO) {
-                            val np = runCatching {
-                                // В `viewer/`: расшифрованные копии оттуда убираются на старте.
-                                val dir = java.io.File(ctx.cacheDir, "viewer").apply { mkdirs() }
-                                val f = java.io.File(dir, "voice_$blobId.m4a").apply { writeBytes(bytes) }
-                                android.media.MediaPlayer().apply {
-                                    setDataSource(f.absolutePath)
-                                    prepare()
-                                }
-                            }.getOrNull() ?: return@launch
-                            // Пузырь ушёл с экрана, пока плеер готовился, — отпускаем
-                            // его здесь: onDispose про него ещё не знает.
-                            try {
-                                withContext(Dispatchers.Main) {
-                                    if (player.value != null) {
-                                        np.release() // второй тап, пока готовился первый
-                                        return@withContext
-                                    }
-                                    durationMs = np.duration
-                                    np.setOnCompletionListener {
-                                        playing = false
-                                        it.seekTo(0)
-                                    }
-                                    np.start()
-                                    player.value = np
-                                    playing = true
-                                }
-                            } catch (e: kotlinx.coroutines.CancellationException) {
-                                np.release()
-                                throw e
-                            }
+                    when {
+                        mp != null && mp.isPlaying -> {
+                            mp.pause()
+                            playing = false
                         }
+                        mp != null -> {
+                            mp.start()
+                            playing = true
+                        }
+                        else -> prepare(start = true, at = posMs)
                     }
                 },
             contentAlignment = Alignment.Center,
@@ -1888,21 +1899,30 @@ internal fun VoiceAttachment(bytes: ByteArray?, blobId: String, knownDurationMs:
             } else {
                 Icon(
                     if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    null,
+                    stringResource(if (playing) R.string.media_pause else R.string.media_play),
                     tint = HoloAccentDark,
                     modifier = Modifier.size(Tokens.Size.iconM),
                 )
             }
         }
         Spacer(Modifier.width(Tokens.Space.m))
-        Icon(Icons.Filled.Mic, null, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconS))
-        Spacer(Modifier.width(Tokens.Space.s))
-        Text(
-            if (durationMs > 0) fmtDuration(durationMs) else stringResource(R.string.chat_voice),
-            color = Color.White,
-            fontSize = Tokens.Font.body,
-            modifier = Modifier.padding(end = Tokens.Space.s),
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
+            VoiceBars(
+                wave?.levels,
+                bars,
+                posMs.toFloat() / durationMs.coerceAtLeast(1),
+                onSeek = if (bytes != null && durationMs > 0) ::seek else null,
+            )
+            Text(
+                when {
+                    playing || posMs > 0 -> fmtDuration(posMs) + " / " + fmtDuration(durationMs)
+                    durationMs > 0 -> fmtDuration(durationMs)
+                    else -> stringResource(R.string.chat_voice)
+                },
+                color = HoloSecondary,
+                fontSize = Tokens.Font.small,
+            )
+        }
     }
 }
 
