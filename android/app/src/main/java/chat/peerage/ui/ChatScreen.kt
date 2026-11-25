@@ -1154,7 +1154,9 @@ internal fun MessageRow(
     // Выбор — у всего ряда (app-ui.md → «Действия»): заливка во всю ширину и кружок у
     // ведущего края. Не обводка пузыря: обводкой отмечено упоминание меня.
     val ref = MsgRef(m.id, m.sender)
-    val selected = selecting && ref in model.selection
+    // У альбома (п. 69) ряд выбран, когда выбраны все его снимки; часть — видна по ячейкам.
+    val row = rowMessages(m)
+    val selected = selecting && DragRange.rowSelected(model.selection, row.map { MsgRef(it.id, it.sender) })
     // Правимое сообщение подсвечено так же (макет `chatact/Edit`): видно, что именно меняется.
     val editingThis = model.editTarget?.let { it.id == m.id && it.sender == m.sender } == true
     // Пришли сюда капсулой или по цитате (5.7): ряд подсвечен так же и гаснет плавно.
@@ -1190,7 +1192,7 @@ internal fun MessageRow(
             )
             .then(
                 when {
-                    selecting -> Modifier.toggleable(selected, press, indication = null, role = Role.Checkbox) { model.toggleSelect(m) }
+                    selecting -> Modifier.toggleable(selected, press, indication = null, role = Role.Checkbox) { model.toggleSelect(row) }
                     bubbleRow -> Modifier.combinedClickable(press, indication = null, onLongClick = gestures.onLong, onClick = gestures.onTap)
                     else -> Modifier
                 },
@@ -1379,7 +1381,7 @@ private fun MessageBubble(
     // С какого снимка открыт просмотрщик (null — закрыт): у альбома (п. 69) — с того, что нажат.
     var viewer by remember { mutableStateOf<MsgRef?>(null) }
     // Альбом рисуется рядом ПЕРВОГО своего сообщения (п. 69); у прочих рядов — пусто.
-    val album = LocalAlbum.current.takeIf { a -> a.size >= 2 && a.first().let { it.id == m.id && it.sender == m.sender } }
+    val album = rowMessages(m).takeIf { it.size >= 2 }
     val selecting = model.selection.isNotEmpty()
     // Не доставлено (выброшено из очереди или не легло в неё): красная обводка и строка
     // «Повторить» под пузырём. Только в личном чате — у групп статуса доставки нет.
@@ -1640,18 +1642,19 @@ private fun bubbleGestures(model: AppModel, m: Message, pos: BlockPos, group: Bo
     val drag = LocalDragSelect.current
     val chatId = if (group) model.currentGroup else model.currentChat
     val shape = bubbleShape(m.mine, pos, far)
+    val row = rowMessages(m)
     return BubbleGestures(
         place,
         onTap = {
             if (model.selection.isNotEmpty()) {
-                model.toggleSelect(m)
+                model.toggleSelect(row)
             } else if (chatId != null && m.id != 0L) {
                 model.bubbleActions = BubbleActions(m, ChatTarget(chatId, group), place.rect, shape)
             }
         },
         onLong = {
             if (m.selectable) {
-                if (drag != null) drag.start(model, m) else model.toggleSelect(m)
+                if (drag != null) drag.start(model, m) else model.toggleSelect(row)
             }
         },
     )

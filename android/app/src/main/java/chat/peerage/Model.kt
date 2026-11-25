@@ -2097,12 +2097,15 @@ class AppModel private constructor() {
     /** Открытое меню у пузыря; null — закрыто. */
     var bubbleActions by mutableStateOf<BubbleActions?>(null)
 
-    fun toggleSelect(m: Message) {
+    fun toggleSelect(m: Message) = toggleSelect(listOf(m))
+
+    /** Тап по ряду в режиме выбора: [row] — его сообщения (у альбома — все снимки, п. 69). */
+    fun toggleSelect(row: List<Message>) {
         // Сообщения без id (старый клиент) выбрать нельзя: с ними нечего делать —
         // ни отозвать, ни ответить, а «удалить у себя» без ссылки не адресуется.
-        if (m.id == 0L) return
-        val ref = MsgRef(m.id, m.sender)
-        selection = if (ref in selection) selection - ref else selection + ref
+        val refs = row.filter { it.id != 0L }.map { MsgRef(it.id, it.sender) }
+        if (refs.isEmpty()) return
+        selection = DragRange.toggleRow(selection, refs)
     }
 
     /** Забыть всё, что относится к прежде открытому чату. */

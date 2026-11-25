@@ -59,6 +59,13 @@ class AlbumTest {
     }
 
     @Test
+    fun feedRowsPutAnAlbumIntoOneRow() {
+        val feed = listOf(null, "a", "a", "a", null, "b")
+        assertEquals(listOf(0..0, 1..3, 4..4, 5..5), Album.feedRows(feed) { it })
+        assertEquals(emptyList<IntRange>(), Album.feedRows(emptyList<String?>()) { it })
+    }
+
+    @Test
     fun longRunIsCutIntoAlbumsOfMax() {
         val feed = List(Album.MAX + 3) { "a" }
         assertEquals(0 until Album.MAX, Album.span(feed, 4) { it })

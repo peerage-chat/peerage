@@ -56,6 +56,18 @@ object Album {
         return if (end > start) start..end else null
     }
 
+    /** Ряды ленты по порядку: альбом — один ряд ([span]), остальное — по сообщению. */
+    fun <T> feedRows(items: List<T>, key: (T) -> Any?): List<IntRange> {
+        val out = ArrayList<IntRange>()
+        var i = 0
+        while (i < items.size) {
+            val r = span(items, i, key) ?: i..i
+            out += r
+            i = r.last + 1
+        }
+        return out
+    }
+
     /** Признак альбома у сообщения ленты: снимок или видео с номером; автор — часть ключа. */
     fun key(m: Message): String? =
         if (m.album != 0L && !m.deleted && (m.kind == "image" || m.kind == "video")) "${m.sender}:${m.mine}:${m.album}" else null

@@ -1816,7 +1816,12 @@ internal fun rememberDragSelect(msgs: List<Message>, listState: androidx.compose
     val drag = remember { DragSelect() }
     val latest by androidx.compose.runtime.rememberUpdatedState(msgs)
     androidx.compose.runtime.SideEffect {
-        drag.order = { latest.filter { it.selectable }.map { MsgRef(it.id, it.sender) } }
+        drag.order = {
+            val feed = latest
+            chat.peerage.Album.feedRows(feed, chat.peerage.Album::key)
+                .map { r -> feed.subList(r.first, r.last + 1).filter { it.selectable }.map { MsgRef(it.id, it.sender) } }
+                .filter { it.isNotEmpty() }
+        }
         drag.scrollBy = { px -> listState.scrollBy(px) }
     }
     return drag

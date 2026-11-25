@@ -42,6 +42,14 @@ import chat.peerage.Tokens
 internal val LocalAlbum = compositionLocalOf<List<Message>> { emptyList() }
 
 /**
+ * Сообщения ряда [m]: все снимки альбома, если ряд его рисует, иначе само [m]. Ряд — единица
+ * выбора: его кружок, тап в режиме выбора и протяжка берут альбом целиком.
+ */
+@Composable
+internal fun rowMessages(m: Message): List<Message> =
+    LocalAlbum.current.takeIf { a -> a.size >= 2 && a.first().let { it.id == m.id && it.sender == m.sender } } ?: listOf(m)
+
+/**
  * Сетка альбома шириной [width]: ряды по [Album.rows], одиночный ряд — шире, чем высок.
  * У каждой ячейки своё: тап — просмотрщик с этого снимка ([onOpen]), в выборе — выбор этого
  * сообщения; долгое нажатие — выбор этого сообщения; ещё не скачанное — кнопкой загрузки.

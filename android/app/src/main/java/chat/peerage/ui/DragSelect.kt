@@ -30,8 +30,8 @@ internal class DragSelect {
     /** Границы выбираемых рядов в окне, по сообщению. */
     val rows = HashMap<MsgRef, Rect>()
 
-    /** Выбираемые сообщения ленты в хронологии — задаёт лента. */
-    var order: () -> List<MsgRef> = { emptyList() }
+    /** Выбираемые ряды ленты в хронологии (альбом — один ряд) — задаёт лента. */
+    var order: () -> List<List<MsgRef>> = { emptyList() }
 
     /** Прокрутить ленту на [px] (положительное — к старым), задаёт лента. */
     var scrollBy: suspend (Float) -> Float = { 0f }
@@ -46,12 +46,12 @@ internal class DragSelect {
     private var last: MsgRef? = null
     private var adding = true
 
-    /** Долгий тап по сообщению [m]: оно выбирается (или снимается, если было выбрано), дальше — протяжка. */
+    /** Долгий тап по ряду сообщения [m]: ряд выбирается (или снимается, если был выбран целиком), дальше — протяжка. */
     fun start(model: AppModel, m: Message) {
         val ref = MsgRef(m.id, m.sender)
         this.model = model
         base = model.selection
-        adding = ref !in base
+        adding = !DragRange.rowSelected(base, DragRange.rowOf(order(), ref))
         anchor = ref
         last = null
         active = true
