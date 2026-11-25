@@ -767,6 +767,7 @@ impl GroupManager {
                 fwd_anon,
                 reply_to: media.reply_to,
                 reply_sender: media.reply_sender.clone(),
+                album: media.album,
                 downloaded: true, // своё вложение уже у нас
                 ..Default::default()
             },
@@ -1095,6 +1096,7 @@ impl GroupManager {
                             fwd_anon: media.fwd_anon,
                             reply_to: media.reply_to,
                             reply_sender: media.reply_sender.clone(),
+                            album: media.album,
                             // Скачано ли — решит верхний слой (он знает хранилище блобов).
                             downloaded: false,
                             ..Default::default()

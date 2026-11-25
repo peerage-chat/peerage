@@ -624,6 +624,16 @@ class AppModel private constructor() {
     var chatSounds by mutableStateOf(true)
         private set
 
+    /** «Группировать» в панели вложений (п. 69): снимки и видео, отправленные разом, — альбомом. */
+    var groupMedia by mutableStateOf(true)
+        private set
+
+    fun setGroupMediaOn(on: Boolean) {
+        groupMedia = on
+        appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean("group_media", on)?.apply()
+    }
+
     fun setChatSoundsOn(on: Boolean) {
         chatSounds = on
         appContext?.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
@@ -1109,6 +1119,7 @@ class AppModel private constructor() {
         shareChatsInMenu = prefs.getBoolean("share_chats", false)
         notifyFlood = prefs.getBoolean("notif_flood", true)
         chatSounds = prefs.getBoolean("chat_sounds", true)
+        groupMedia = prefs.getBoolean("group_media", true)
         notifyText = prefs.getBoolean("notif_text", true)
         notifyRequests = prefs.getBoolean("notif_requests", true)
         mediaColumns = prefs.getInt("media_columns", 3).takeIf { it in MEDIA_COLUMNS } ?: 3
@@ -2219,13 +2230,13 @@ class AppModel private constructor() {
             Native.groupSendMedia(
                 sessionPtr, key, content, mime, name,
                 meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
-                reply?.id ?: 0, reply?.sender.orEmpty(),
+                reply?.id ?: 0, reply?.sender.orEmpty(), meta.album,
             )
         } else {
             val id = Native.sendMediaWithMeta(
                 sessionPtr, key, content, mime, name,
                 meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
-                reply?.id ?: 0, replyAuthor(key, reply),
+                reply?.id ?: 0, replyAuthor(key, reply), meta.album,
             )
             if (id >= 0 && currentChat == key) loadHistory(key)
         }
@@ -2266,13 +2277,13 @@ class AppModel private constructor() {
             Native.groupSendMediaFile(
                 sessionPtr, key, path, mime, name,
                 meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
-                reply?.id ?: 0, reply?.sender.orEmpty(),
+                reply?.id ?: 0, reply?.sender.orEmpty(), meta.album,
             )
         } else {
             val id = Native.sendMediaFile(
                 sessionPtr, key, path, mime, name,
                 meta.durationMs, meta.width, meta.height, meta.thumb ?: ByteArray(0), caption,
-                reply?.id ?: 0, replyAuthor(key, reply),
+                reply?.id ?: 0, replyAuthor(key, reply), meta.album,
             )
             if (id >= 0 && currentChat == key) loadHistory(key)
         }

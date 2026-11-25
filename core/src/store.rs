@@ -1079,6 +1079,10 @@ pub struct StoredMessage {
     /// строка: имя рисует клиент по своим контактам (см. [`crate::mention`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mentions: Vec<crate::mention::Mention>,
+    /// Альбом (п. 69): снимки, отправленные разом с «Группировать», несут один номер — клиент
+    /// рисует подряд идущие вложения одного автора с одним номером сеткой. 0 — не в альбоме.
+    #[serde(default, skip_serializing_if = "crate::protocol::is_zero_u64")]
+    pub album: u64,
     /// Курсор пагинации: номер строки в ЛОКАЛЬНОЙ базе. Только на чтение — при
     /// записи игнорируется, на другом устройстве он свой.
     #[serde(default)]
@@ -1292,12 +1296,12 @@ fn with_reactions(conn: &rusqlite::Connection, chat: Chat, mut rows: Vec<StoredM
 const MSG_COLS: &str = "m.rowid, m.id, m.sender, m.mine, m.text, m.time, m.status, m.kind,
      m.blob_id, m.mime, m.name, m.size, m.duration_ms, m.width, m.height, m.thumb_id,
      m.downloaded, m.reply_to, m.reply_sender, m.system, m.fwd_from, m.fwd_anon,
-     m.edited_at, m.mentions";
+     m.edited_at, m.mentions, m.album";
 
 /// Сколько колонок в [`MSG_COLS`] — с этого места начинаются дописанные к запросу.
 /// Держать числом рядом со списком: запрос, который добавит колонку и забудет про
 /// сдвиг, прочитает соседнее поле молча.
-const MSG_COL_COUNT: usize = 24;
+const MSG_COL_COUNT: usize = 25;
 
 fn read_msg(row: &rusqlite::Row) -> rusqlite::Result<StoredMessage> {
     read_msg_offset(row, 0)
@@ -2171,9 +2175,9 @@ impl MessageStore {
             "INSERT OR IGNORE INTO chat_messages
                  (chat, scope, id, sender, mine, text, time, status, kind, blob_id, mime, name,
                   size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_sender,
-                  system, fwd_from, fwd_anon, edited_at, mentions)
+                  system, fwd_from, fwd_anon, edited_at, mentions, album)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                     ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+                     ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
             rusqlite::params![
                 chat.id(), chat.scope(), m.id as i64, &m.sender, m.mine as i64,
                 &m.text, m.time, &m.status,
@@ -2181,7 +2185,7 @@ impl MessageStore {
                 m.size as i64, m.duration_ms as i64, m.width as i64, m.height as i64,
                 &m.thumb_id, m.downloaded as i64,
                 m.reply_to as i64, &m.reply_sender, m.system as i64, &m.fwd_from,
-                m.fwd_anon as i64, m.edited_at, mentions_json(&m.mentions),
+                m.fwd_anon as i64, m.edited_at, mentions_json(&m.mentions), m.album as i64,
             ],
         )?;
         Ok(n > 0)
@@ -2204,9 +2208,9 @@ fn insert_message(conn: &rusqlite::Connection, chat: Chat, msg: &StoredMessage) 
         "INSERT OR IGNORE INTO chat_messages
              (chat, scope, id, sender, mine, text, time, status, kind, blob_id, mime, name,
               size, duration_ms, width, height, thumb_id, downloaded, reply_to, reply_sender,
-              system, fwd_from, fwd_anon, edited_at, mentions)
+              system, fwd_from, fwd_anon, edited_at, mentions, album)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
         rusqlite::params![
             chat.id(), chat.scope(), msg.id as i64, &msg.sender, msg.mine as i64,
             &msg.text, msg.time, &msg.status,
@@ -2214,7 +2218,7 @@ fn insert_message(conn: &rusqlite::Connection, chat: Chat, msg: &StoredMessage) 
             msg.size as i64, msg.duration_ms as i64, msg.width as i64, msg.height as i64,
             &msg.thumb_id, msg.downloaded as i64,
             msg.reply_to as i64, &msg.reply_sender, msg.system as i64, &msg.fwd_from,
-            msg.fwd_anon as i64, msg.edited_at, mentions_json(&msg.mentions),
+            msg.fwd_anon as i64, msg.edited_at, mentions_json(&msg.mentions), msg.album as i64,
         ],
     )?;
     if n == 0 {
@@ -2250,6 +2254,7 @@ fn read_msg_offset(row: &rusqlite::Row, off: usize) -> rusqlite::Result<StoredMe
         fwd_anon: row.get::<_, i64>(off + 21)? != 0,
         edited_at: row.get(off + 22)?,
         mentions: serde_json::from_str(&row.get::<_, String>(off + 23)?).unwrap_or_default(),
+        album: row.get::<_, i64>(off + 24)? as u64,
         reactions: Vec::new(),
     })
 }
@@ -2548,6 +2553,19 @@ mod tests {
         store.set_chat_notify(Chat::Dm(&c), None).unwrap();
         assert_eq!(store.summaries()[0].notify, None, "вернули к умолчанию");
         assert!(!store.chat_flags().iter().any(|f| f.0 == c.to_vec()));
+    }
+
+    /// Номер альбома (п. 69) переживает запись и чтение; у обычного — 0.
+    #[test]
+    fn album_is_stored() {
+        let store = MessageStore::open(db());
+        let c = key();
+        let m = |id, album| StoredMessage { id, kind: "image".into(), album, ..Default::default() };
+        store.append(Chat::Dm(&c), &m(1, 77)).unwrap();
+        store.append(Chat::Dm(&c), &m(2, 0)).unwrap();
+        let h = store.history(Chat::Dm(&c), None, 10);
+        let album = |id| h.iter().find(|x| x.id == id).unwrap().album;
+        assert_eq!((album(1), album(2)), (77, 0));
     }
 
     /// Порядок закреплённых чатов (п. 67): переставленные получают строго убывающие метки

@@ -161,6 +161,11 @@ pub enum Payload {
         /// Время отправки, мс (см. `Text::sent`).
         #[serde(default, skip_serializing_if = "is_zero")]
         sent: i64,
+        /// Альбом (п. 69): вложения, отправленные разом с «Группировать», несут один
+        /// случайный номер. Необязательное поле (заморозка формата): старая версия его не
+        /// знает и рисует снимки по одному. 0 — не в альбоме, на провод не идёт.
+        #[serde(default, skip_serializing_if = "is_zero_u64")]
+        album: u64,
     },
     /// Подтверждение доставки сообщения с данным id (✓✓ в ТЗ).
     Ack { id: u64 },
@@ -452,6 +457,11 @@ pub const APP_BUCKET: usize = 4096;
 /// `padded_blob_chunk_fits_datagram`.
 const CHUNK_BUCKET: usize = 12 * 1024 + 256;
 
+/// Ноль не пишется на провод и в копию: необязательное поле без значения — его отсутствие.
+pub(crate) fn is_zero_u64(v: &u64) -> bool {
+    *v == 0
+}
+
 fn is_zero(v: &i64) -> bool {
     *v == 0
 }
@@ -564,12 +574,17 @@ mod tests {
             Payload::Text { id: 1, text: "hi".into(), reply_to: 0, reply_mine: false, fwd_from: String::new(), fwd_anon: false, sent: 1_790_000_000_000 },
             Payload::Media {
                 id: 2, hash: vec![5u8; 32], mime: "image/jpeg".into(), name: "p.jpg".into(),
-                size: 1234, duration_ms: 0, width: 800, height: 600, caption: String::new(), thumb: vec![9u8; 32], fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false, sent: 0,
+                size: 1234, duration_ms: 0, width: 800, height: 600, caption: String::new(), thumb: vec![9u8; 32], fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false, sent: 0, album: 0,
             },
             // Видео с длительностью и без превью — поля опциональны.
             Payload::Media {
                 id: 3, hash: vec![6u8; 32], mime: "video/mp4".into(), name: "v.mp4".into(),
-                size: 900_000_000, duration_ms: 125_000, width: 1920, height: 1080, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false, sent: 0,
+                size: 900_000_000, duration_ms: 125_000, width: 1920, height: 1080, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false, sent: 0, album: 0,
+            },
+            // Снимок альбома (п. 69).
+            Payload::Media {
+                id: 4, hash: vec![7u8; 32], mime: "image/jpeg".into(), name: "a.jpg".into(),
+                size: 10, duration_ms: 0, width: 1, height: 1, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false, sent: 0, album: 0xA1B2_C3D4_E5F6_0718,
             },
             Payload::RoomInvite { id: 11, room_id: vec![1u8; 16], audio: true, video: false },
             Payload::RoomDecline { id: 12, room_id: vec![2u8; 16] },
@@ -635,17 +650,17 @@ mod tests {
             enc(&Payload::Media {
                 id: 2, hash: vec![5u8; 32], mime: "image/jpeg".into(),
                 name: "secret-photo.jpg".into(), size: 2_400_000,
-                duration_ms: 0, width: 4000, height: 3000, caption: String::new(), thumb: vec![1u8; 32], fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false, sent: 0,
+                duration_ms: 0, width: 4000, height: 3000, caption: String::new(), thumb: vec![1u8; 32], fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false, sent: 0, album: 0,
             }),
             enc(&Payload::Media {
                 id: 3, hash: vec![6u8; 32], mime: "audio/mp4".into(),
                 name: "voice.m4a".into(), size: 48_000,
-                duration_ms: 7_400, width: 0, height: 0, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false, sent: 0,
+                duration_ms: 7_400, width: 0, height: 0, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false, sent: 0, album: 0,
             }),
             enc(&Payload::Media {
                 id: 4, hash: vec![7u8; 32], mime: "application/pdf".into(),
                 name: "договор-2026.pdf".into(), size: 900_000_000,
-                duration_ms: 0, width: 0, height: 0, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false, sent: 0,
+                duration_ms: 0, width: 0, height: 0, caption: String::new(), thumb: Vec::new(), fwd_from: String::new(), fwd_anon: false, reply_to: 0, reply_mine: false, sent: 0, album: 0,
             }),
             enc(&Payload::Group { id: 5, data: vec![1u8; 200] }),
             // Правка своего сообщения: короткая и длинная неотличимы от текста.

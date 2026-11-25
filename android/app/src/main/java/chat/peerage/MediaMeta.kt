@@ -14,12 +14,14 @@ data class MediaMeta(
     val height: Int = 0,
     /** JPEG-миниатюра (null — нет). Уйдёт отдельным мелким блобом. */
     val thumb: ByteArray? = null,
+    /** Альбом (п. 69): общий номер вложений, отправленных разом; 0 — не в альбоме. */
+    val album: Long = 0,
 ) {
     // ByteArray ломает автогенерируемые equals/hashCode — сравниваем по содержимому.
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is MediaMeta) return false
-        return durationMs == other.durationMs && width == other.width && height == other.height &&
+        return durationMs == other.durationMs && width == other.width && height == other.height && album == other.album &&
             (thumb?.contentEquals(other.thumb) ?: (other.thumb == null))
     }
 
@@ -27,6 +29,7 @@ data class MediaMeta(
         var r = durationMs
         r = 31 * r + width
         r = 31 * r + height
+        r = 31 * r + album.hashCode()
         r = 31 * r + (thumb?.contentHashCode() ?: 0)
         return r
     }

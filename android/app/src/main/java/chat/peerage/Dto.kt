@@ -84,6 +84,8 @@ internal data class MessageDto(
     val width: Int = 0,
     val height: Int = 0,
     @SerialName("thumb_id") val thumbId: String = "",
+    /** Альбом (п. 69): общий номер вложений, отправленных разом; 0 — не в альбоме. */
+    val album: Long = 0,
     val downloaded: Boolean = false,
     val mentions: List<Mention> = emptyList(),
     val reactions: List<Reaction> = emptyList(),
@@ -425,6 +427,7 @@ internal fun MessageDto.toModel() = Message(
     width = width,
     height = height,
     thumbId = thumbId,
+    album = album,
     downloaded = downloaded,
     mentions = mentions,
     reactions = reactions,

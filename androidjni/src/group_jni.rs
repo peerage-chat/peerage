@@ -184,6 +184,7 @@ fn media_info<'local>(
     caption: &JString<'local>,
     reply_to: jlong,
     reply_sender: &JString<'local>,
+    album: jlong,
 ) -> peerage_engine::MediaInfo {
     let thumb_bytes = env.convert_byte_array(thumb).unwrap_or_default();
     peerage_engine::MediaInfo {
@@ -196,6 +197,7 @@ fn media_info<'local>(
         caption: jstr(env, caption),
         reply_to: reply_to.max(0) as u64,
         reply_sender: jstr(env, reply_sender),
+        album: album as u64,
     }
 }
 
@@ -218,6 +220,7 @@ pub extern "system" fn Java_chat_peerage_Native_groupSendMedia<'local>(
     caption: JString<'local>,
     reply_to: jlong,
     reply_sender_hex: JString<'local>,
+    album: jlong,
 ) {
     jni_safe!((), {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return };
@@ -226,7 +229,7 @@ pub extern "system" fn Java_chat_peerage_Native_groupSendMedia<'local>(
         if bytes.is_empty() { return; }
         let (mime, name) = (jstr(&mut env, &mime), jstr(&mut env, &name));
         let info =
-            media_info(&mut env, duration_ms, width, height, &thumb, &caption, reply_to, &reply_sender_hex);
+            media_info(&mut env, duration_ms, width, height, &thumb, &caption, reply_to, &reply_sender_hex, album);
         e.group_send_media(gid, bytes, mime, name, info);
     });
 }
@@ -249,6 +252,7 @@ pub extern "system" fn Java_chat_peerage_Native_groupSendMediaFile<'local>(
     caption: JString<'local>,
     reply_to: jlong,
     reply_sender_hex: JString<'local>,
+    album: jlong,
 ) {
     jni_safe!((), {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return };
@@ -256,7 +260,7 @@ pub extern "system" fn Java_chat_peerage_Native_groupSendMediaFile<'local>(
         let path = std::path::PathBuf::from(jstr(&mut env, &path));
         let (mime, name) = (jstr(&mut env, &mime), jstr(&mut env, &name));
         let info =
-            media_info(&mut env, duration_ms, width, height, &thumb, &caption, reply_to, &reply_sender_hex);
+            media_info(&mut env, duration_ms, width, height, &thumb, &caption, reply_to, &reply_sender_hex, album);
         e.group_send_media_file(gid, path, mime, name, info);
     });
 }

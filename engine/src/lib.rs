@@ -232,6 +232,9 @@ pub struct MediaInfo {
     /// hex автора цитируемого сообщения (пусто — обычное). Ссылка «автор + id»
     /// (ADR-006): на проводе едет флаг «моё/не моё», здесь — явный автор.
     pub reply_sender: String,
+    /// Альбом (п. 69): общий номер вложений, отправленных разом с «Группировать» (его
+    /// выбирает клиент); 0 — не в альбоме.
+    pub album: u64,
 }
 
 /// Сколько сообщений отдаётся клиенту за один заход в чат. Переписка бывает
@@ -1251,6 +1254,8 @@ impl Engine {
                     // где лежит оригинал, а в новом эта ссылка указывала бы в пустоту.
                     reply_to: 0,
                     reply_sender: String::new(),
+                    // Пересланное — по одному: альбом собирался в другом чате.
+                    album: 0,
                 };
                 self.send_media_ref(peer, hash, m.size, &m.mime, &m.name, thumb, &info)
                     .is_some()
@@ -1273,6 +1278,7 @@ impl Engine {
                     height: m.height,
                     thumb: thumb.map(hex::encode).unwrap_or_default(),
                     sent: 0, // ставит слой групп при отправке
+                    album: 0,
                 };
                 self.jobs
                     .send(Job::GroupMediaRef {
@@ -1486,6 +1492,7 @@ impl Engine {
             // На проводе «чьё» едет с точки зрения отправителя: наш ответ на своё
             // сообщение для получателя — ответ на наше.
             reply_mine: info.reply_sender == self.me_hex(),
+            album: info.album,
         };
         let id = self
             .messenger
@@ -1518,6 +1525,7 @@ impl Engine {
                 downloaded: true, // своё вложение уже у нас
                 reply_to: info.reply_to,
                 reply_sender: info.reply_sender.clone(),
+                album: info.album,
                 ..Default::default()
             },
         );
@@ -4284,6 +4292,7 @@ fn prepare_group_media(engine: &Arc<Engine>, job: Job) -> Option<(Vec<u8>, Media
         height: info.height,
         thumb,
         sent: 0, // ставит слой групп при отправке
+        album: info.album,
     };
     Some((gid, media))
 }
@@ -4548,6 +4557,7 @@ fn handle_event(
             reply_to,
             reply_mine,
             sent,
+            album,
         } => {
             match gate_of(engine, &peer) {
                 Gate::Blocked => return,
@@ -4596,6 +4606,7 @@ fn handle_event(
                     } else {
                         hex::encode(peer)
                     },
+                    album,
                     ..Default::default()
                 };
                 // Миниатюру тянем всегда — она мелкая, ради неё и заведена.

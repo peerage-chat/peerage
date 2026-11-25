@@ -245,8 +245,11 @@ private fun GroupFeedList(model: AppModel, msgs: List<Message>, listState: LazyL
         items(msgs.size, key = { j -> msgs[msgs.size - 1 - j].let { "${it.sender}:${it.id}" } }) { j ->
             val i = msgs.size - 1 - j
             val m = msgs[i]
+            // Альбом (п. 69) рисует его первое сообщение, прочие ряды пусты.
+            val album = Album.span(msgs, i, Album::key)
+            if (album != null && i != album.first) return@items
             val prev = msgs.getOrNull(i - 1)
-            val next = msgs.getOrNull(i + 1)
+            val next = msgs.getOrNull((album?.last ?: i) + 1)
             FeedItem(fresh, MsgRef(m.id, m.sender)) {
                 if (prev == null || dayKey(prev.time) != dayKey(m.time)) DateChip(dayLabel(m.time))
                 // Склейка блоков. Системная строка — разделитель: у неё нет
@@ -257,7 +260,9 @@ private fun GroupFeedList(model: AppModel, msgs: List<Message>, listState: LazyL
                 val withNext = next != null && !m.system && !next.system &&
                     continuesBlock(m.sender, m.time, next.sender, next.time)
                 val pos = blockPos(withPrev, withNext)
-                MessageRow(model, m, pos, group = true, far = seriesCut(m, prev.takeIf { withPrev }, next.takeIf { withNext }))
+                CompositionLocalProvider(LocalAlbum provides (album?.let { msgs.subList(it.first, it.last + 1) } ?: emptyList())) {
+                    MessageRow(model, m, pos, group = true, far = seriesCut(m, prev.takeIf { withPrev }, next.takeIf { withNext }))
+                }
             }
         }
     }

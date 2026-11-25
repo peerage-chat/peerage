@@ -482,6 +482,7 @@ pub extern "system" fn Java_chat_peerage_Native_sendMediaWithMeta<'local>(
     caption: JString<'local>,
     reply_to: jlong,
     reply_sender_hex: JString<'local>,
+    album: jlong,
 ) -> jlong {
     jni_safe!(-1, {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return -1 };
@@ -502,6 +503,7 @@ pub extern "system" fn Java_chat_peerage_Native_sendMediaWithMeta<'local>(
             caption,
             reply_to: reply_to.max(0) as u64,
             reply_sender: jstr(&mut env, &reply_sender_hex),
+            album: album as u64,
         };
         e.send_media_with(&key, bytes, &mime, &name, info).unwrap_or(-1)
     })
@@ -526,6 +528,7 @@ pub extern "system" fn Java_chat_peerage_Native_sendMediaFile<'local>(
     caption: JString<'local>,
     reply_to: jlong,
     reply_sender_hex: JString<'local>,
+    album: jlong,
 ) -> jlong {
     jni_safe!(-1, {
         let Some(e) = (unsafe { engine(session_ptr) }) else { return -1 };
@@ -545,6 +548,7 @@ pub extern "system" fn Java_chat_peerage_Native_sendMediaFile<'local>(
             caption,
             reply_to: reply_to.max(0) as u64,
             reply_sender: jstr(&mut env, &reply_sender_hex),
+            album: album as u64,
         };
         e.send_media_file(&key, std::path::Path::new(&path), &mime, &name, info).unwrap_or(-1)
     })

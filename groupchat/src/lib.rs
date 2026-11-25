@@ -148,9 +148,17 @@ pub struct MediaBody {
     /// Время отправки, мс (см. `AppMsg::Text::sent`); ставит [`GroupChat::send_media`].
     #[serde(default, skip_serializing_if = "is_zero")]
     pub sent: i64,
+    /// Альбом (п. 69): общий номер вложений, отправленных разом; 0 — не в альбоме и на
+    /// провод не идёт (необязательное поле: старая версия рисует снимки по одному).
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub album: u64,
 }
 
 fn is_zero(v: &i64) -> bool {
+    *v == 0
+}
+
+fn is_zero_u64(v: &u64) -> bool {
     *v == 0
 }
 

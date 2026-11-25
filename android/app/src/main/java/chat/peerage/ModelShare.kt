@@ -178,9 +178,11 @@ internal fun AppModel.sendShared(ctx: Context, draft: ShareDraft, targets: List<
     val app = ctx.applicationContext
     kotlin.concurrent.thread(name = "share-send", isDaemon = true) {
         targets.forEach { t ->
+            // Снимки и видео, отправленные разом, — альбомом (п. 69): у каждого чата свой номер.
+            val albums = Album.ids(draft.items.map { it.isImage || it.isVideo }, groupMedia) { Album.newId() }
             draft.items.forEachIndexed { i, item ->
                 runCatching {
-                    chat.peerage.ui.sendUriNow(app, this, t.id, item.uri, item.name, if (i == 0) caption else "", t.group)
+                    chat.peerage.ui.sendUriNow(app, this, t.id, item.uri, item.name, if (i == 0) caption else "", t.group, albums[i])
                 }
             }
         }

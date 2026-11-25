@@ -1395,4 +1395,7 @@
 
     <!-- Перемотка голосового по волне (п. 68) -->
     <string name="voice_seek">Playback position</string>
+
+    <!-- Альбом: снимки, отправленные разом, — одной сеткой (п. 69) -->
+    <string name="attach_group">Group</string>
 </resources>

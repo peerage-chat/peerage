@@ -401,8 +401,11 @@ private fun DmFeedList(model: AppModel, msgs: List<Message>, listState: LazyList
         items(msgs.size, key = { j -> msgs[msgs.size - 1 - j].let { "${it.sender}:${it.id}" } }) { j ->
             val i = msgs.size - 1 - j
             val m = msgs[i]
+            // Альбом (п. 69) рисует его первое сообщение, прочие ряды пусты.
+            val album = Album.span(msgs, i, Album::key)
+            if (album != null && i != album.first) return@items
             val prev = msgs.getOrNull(i - 1)
-            val next = msgs.getOrNull(i + 1)
+            val next = msgs.getOrNull((album?.last ?: i) + 1)
             // Одна колонка на элемент: дата над пузырём должна остаться НАД ним и
             // в перевёрнутой ленте.
             FeedItem(fresh, MsgRef(m.id, m.sender)) {
@@ -412,7 +415,9 @@ private fun DmFeedList(model: AppModel, msgs: List<Message>, listState: LazyList
                 val withPrev = prev != null && continuesBlock(side(prev), prev.time, side(m), m.time)
                 val withNext = next != null && continuesBlock(side(m), m.time, side(next), next.time)
                 val pos = blockPos(withPrev, withNext)
-                MessageRow(model, m, pos, far = seriesCut(m, prev.takeIf { withPrev }, next.takeIf { withNext }))
+                CompositionLocalProvider(LocalAlbum provides (album?.let { msgs.subList(it.first, it.last + 1) } ?: emptyList())) {
+                    MessageRow(model, m, pos, far = seriesCut(m, prev.takeIf { withPrev }, next.takeIf { withNext }))
+                }
             }
         }
         // Запрос в контакты ещё не принят (7i): сверху ленты — что сообщения ждут.
@@ -480,6 +485,7 @@ internal fun sendUriNow(
     fallbackName: String,
     caption: String,
     group: Boolean,
+    album: Long = 0,
 ) {
     val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
     val name = displayName(ctx, uri) ?: fallbackName
@@ -487,7 +493,7 @@ internal fun sendUriNow(
     // файла целиком. Весят они немного, так что это допустимо.
     if (mime.startsWith("image/")) {
         val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return
-        val meta = MediaMeta.extract(ctx, uri, mime, bytes)
+        val meta = MediaMeta.extract(ctx, uri, mime, bytes).copy(album = album)
         model.sendMediaWithMeta(key, bytes, mime, name, meta, caption, group)
         return
     }
@@ -495,7 +501,7 @@ internal fun sendUriNow(
     // потом движок считает манифест и отдаёт чанки с диска. Видео на гигабайт не
     // должно стоить гигабайта RAM только потому, что его выбрали в пикере.
     val cached = cacheFromUri(ctx, uri, name) ?: return
-    val meta = MediaMeta.extract(ctx, uri, mime, ByteArray(0))
+    val meta = MediaMeta.extract(ctx, uri, mime, ByteArray(0)).copy(album = album)
     model.sendMediaFile(key, cached.absolutePath, mime, name, meta, caption, group)
 }
 
@@ -1370,7 +1376,10 @@ private fun MessageBubble(
     val needsBytes = m.kind == "image" || m.kind == "voice"
     val blobBytes = if (needsBytes) model.blob(m.blobId) else null
     val ready = m.downloaded || model.savedBlobs[m.blobId] == true
-    var viewer by remember { mutableStateOf(false) }
+    // С какого снимка открыт просмотрщик (null — закрыт): у альбома (п. 69) — с того, что нажат.
+    var viewer by remember { mutableStateOf<MsgRef?>(null) }
+    // Альбом рисуется рядом ПЕРВОГО своего сообщения (п. 69); у прочих рядов — пусто.
+    val album = LocalAlbum.current.takeIf { a -> a.size >= 2 && a.first().let { it.id == m.id && it.sender == m.sender } }
     val selecting = model.selection.isNotEmpty()
     // Не доставлено (выброшено из очереди или не легло в неё): красная обводка и строка
     // «Повторить» под пузырём. Только в личном чате — у групп статуса доставки нет.
@@ -1392,7 +1401,8 @@ private fun MessageBubble(
         Column(horizontalAlignment = if (m.mine) Alignment.End else Alignment.Start) {
             // Карточка «скачать» превращается в готовое вложение — это подмена
             // содержимого прямо под пальцем, поэтому переход плавный.
-            val pending = m.blobId.isNotEmpty() && m.kind != "text" &&
+            // У альбома ожидание — у каждой ячейки своё.
+            val pending = album == null && m.blobId.isNotEmpty() && m.kind != "text" &&
                 if (needsBytes) !m.downloaded && blobBytes == null else !ready
             // Фото без подписи — САМО себе пузырь: рамка вокруг картинки не несёт
             // смысла, только съедает 10dp с каждой стороны и делает снимок меньше.
@@ -1401,7 +1411,12 @@ private fun MessageBubble(
             // своей подложке, и сама картинка остаётся голой (так в Telegram).
             val photoBubble = (m.kind == "image" || m.kind == "video") && !pending && m.text.isEmpty()
             // Рамка снимка — по его пропорциям; шапка над голым снимком берёт её ширину.
-            val frame = mediaFrame(m.width, m.height, if (photoBubble) PhotoBubbleSize else Tokens.Size.photoInBubble)
+            val frame = if (album != null) {
+                val w = if (photoBubble) PhotoBubbleSize else Tokens.Size.photoInBubble
+                DpSize(w, w)
+            } else {
+                mediaFrame(m.width, m.height, if (photoBubble) PhotoBubbleSize else Tokens.Size.photoInBubble)
+            }
             // Шапка над фото: пометка пересылки и цитата ответа.
             val photoHeader = photoBubble &&
                 (m.fwdFrom.isNotEmpty() || m.fwdAnon || m.replyTo != 0L || senderName != null)
@@ -1489,6 +1504,7 @@ private fun MessageBubble(
                             head()
                         }
                         when {
+                            album != null -> AlbumGrid(model, album, frame.width, group) { viewer = MsgRef(it.id, it.sender) }
                             isPending -> PendingAttachmentCard(
                                 model,
                                 m.kind,
@@ -1513,7 +1529,7 @@ private fun MessageBubble(
                                     ImageAttachment(
                                         blobBytes,
                                         frame,
-                                        onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
+                                        onOpen = { if (selecting) model.toggleSelect(m) else viewer = MsgRef(m.id, m.sender) },
                                         bare = photoBubble,
                                         onLongClick = onLong,
                                         cacheKey = m.blobId,
@@ -1527,7 +1543,7 @@ private fun MessageBubble(
                                     frame,
                                     ready,
                                     m.durationMs,
-                                    onOpen = { if (selecting) model.toggleSelect(m) else viewer = true },
+                                    onOpen = { if (selecting) model.toggleSelect(m) else viewer = MsgRef(m.id, m.sender) },
                                     bare = photoBubble,
                                     onLongClick = onLong,
                                     cacheKey = m.thumbId,
@@ -1569,15 +1585,16 @@ private fun MessageBubble(
             if (failed) FailedLine { chatId?.let { model.retry(it, m) } }
         }
     }
-    if (viewer && chatId != null) {
+    val start = viewer
+    if (start != null && chatId != null) {
         // Листается всё медиа чата (просмотрщик сам спросит движок); лента — затравка,
         // пока список едет.
         MediaViewer(
             model,
             ChatTarget(chatId, group),
             model.chat(chatId, group),
-            MsgRef(m.id, m.sender),
-            onClose = { viewer = false },
+            start,
+            onClose = { viewer = null },
             onReply = { model.startReply(it) },
             onShowInChat = { model.jumpTo = MsgRef(it.id, it.sender) },
         )

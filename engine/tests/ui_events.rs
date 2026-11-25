@@ -90,6 +90,7 @@ fn dm_event_carries_caption_and_forward_mark() {
     // Вложение с подписью: подпись — в той же строке, а не потеряна до перезахода.
     let info = MediaInfo {
         caption: "подпись".into(),
+        album: 0x51,
         ..Default::default()
     };
     a.send_media_with(&b_key, vec![7u8; 5000], "application/pdf", "doc.pdf", info)
@@ -99,6 +100,7 @@ fn dm_event_carries_caption_and_forward_mark() {
     assert_eq!(ev["chat"], a_hex);
     assert_eq!(ev["group"], false);
     assert_eq!(ev["msg"]["text"], "подпись");
+    assert_eq!(ev["msg"]["album"], 0x51, "номер альбома доехал (п. 69)");
     assert!(
         ev["msg"]["row"].as_i64().unwrap() > 0,
         "курсор пагинации есть"
@@ -106,6 +108,7 @@ fn dm_event_carries_caption_and_forward_mark() {
     let row = in_history(&b.history_json(&a_key), &ev["msg"]);
     assert_eq!(row["text"], ev["msg"]["text"]);
     assert_eq!(row["blob_id"], ev["msg"]["blob_id"]);
+    assert_eq!(row["album"], 0x51, "и лёг в историю");
     assert_eq!(row["row"], ev["msg"]["row"]);
 
     // Пересылка: пометка «переслано» тоже приезжает сразу.

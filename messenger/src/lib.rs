@@ -177,6 +177,8 @@ pub enum Event {
         reply_mine: bool,
         /// Время отправки, мс (см. `Event::Text::sent`).
         sent: i64,
+        /// Альбом (п. 69): номер общий у вложений, отправленных разом; 0 — не в альбоме.
+        album: u64,
     },
     /// Пир подтвердил доставку нашего сообщения с данным id (✓✓).
     Ack { peer: PeerKey, id: u64 },
@@ -252,6 +254,8 @@ pub struct MediaMeta {
     pub reply_to: u64,
     /// Чьё сообщение цитируется, с точки зрения ОТПРАВИТЕЛЯ (ADR-006).
     pub reply_mine: bool,
+    /// Альбом (п. 69): общий номер вложений, отправленных разом; 0 — не в альбоме.
+    pub album: u64,
 }
 
 /// Обрезать подпись до `MAX_CAPTION` БАЙТ по границе символа: рвать UTF-8 посередине
@@ -1459,6 +1463,7 @@ impl Messenger {
             reply_to: meta.reply_to,
             reply_mine: meta.reply_mine,
             sent,
+            album: meta.album,
         })
     }
 
@@ -1990,7 +1995,7 @@ fn receive_loop(shared: Arc<Shared>) {
             Payload::Typing => shared.emit(Event::Typing { peer: peer_id }),
             Payload::Media {
                 id, hash, mime, name, size, duration_ms, width, height, caption, thumb, fwd_from,
-                fwd_anon, reply_to, reply_mine, sent,
+                fwd_anon, reply_to, reply_mine, sent, album,
             } => {
                 shared.emit(Event::Media {
                     peer: peer_id, id, hash, mime, name, size, duration_ms, width, height,
@@ -2002,6 +2007,7 @@ fn receive_loop(shared: Arc<Shared>) {
                     // Как у текста: «моё» отправителя — это «его» для нас.
                     reply_mine: !reply_mine,
                     sent,
+                    album,
                 });
                 let _ = shared.send(&peer_id, &Payload::Ack { id }); // ✓✓ доставлено
             }

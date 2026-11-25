@@ -261,15 +261,22 @@ internal fun AttachPanel(
             if (selected.isNotEmpty()) {
                 val n = selected.size
                 val size = fmtSizeLong(selected.sumOf { it.size })
-                Text(
-                    if (selected.none { it.isVideo }) {
-                        pluralStringResource(R.plurals.attach_picked_photos, n, n, size)
-                    } else {
-                        pluralStringResource(R.plurals.attach_picked_items, n, n, size)
-                    },
-                    color = Tokens.Colors.accent,
-                    fontSize = Tokens.Font.body,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (selected.none { it.isVideo }) {
+                            pluralStringResource(R.plurals.attach_picked_photos, n, n, size)
+                        } else {
+                            pluralStringResource(R.plurals.attach_picked_items, n, n, size)
+                        },
+                        color = Tokens.Colors.accent,
+                        fontSize = Tokens.Font.body,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // Разом — альбомом (п. 69): одна сетка в ленте вместо череды снимков.
+                    if (n >= 2) {
+                        TypeChip(stringResource(R.string.attach_group), model.groupMedia) { model.setGroupMediaOn(!model.groupMedia) }
+                    }
+                }
             }
         }
     }

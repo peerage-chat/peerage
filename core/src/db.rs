@@ -57,7 +57,7 @@ pub fn lock(db: &Db) -> MutexGuard<'_, Connection> {
 }
 
 /// Миграции после заморозки: `STEPS[i]` переводит схему `i + 1` в `i + 2`.
-const STEPS: &[fn(&Connection) -> rusqlite::Result<()>] = &[v2_request_address];
+const STEPS: &[fn(&Connection) -> rusqlite::Result<()>] = &[v2_request_address, v3_album];
 
 /// Схема 2: запрос в контакты хранит подписанную запись адреса отправителя — по ней
 /// ответ уходит на его адрес, а при принятии она становится адресом контакта. У запросов
@@ -68,6 +68,12 @@ fn v2_request_address(conn: &Connection) -> rusqlite::Result<()> {
         "ALTER TABLE contact_requests ADD COLUMN record     BLOB NOT NULL DEFAULT x'';
          ALTER TABLE contact_requests ADD COLUMN record_sig BLOB NOT NULL DEFAULT x'';",
     )
+}
+
+/// Схема 3 (п. 69): номер альбома у сообщения — снимки, отправленные разом с
+/// «Группировать». У старых строк 0: не в альбоме, рисуются как раньше.
+fn v3_album(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch("ALTER TABLE chat_messages ADD COLUMN album INTEGER NOT NULL DEFAULT 0;")
 }
 
 /// Версия схемы этой сборки.

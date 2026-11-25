@@ -130,6 +130,7 @@ fn large_group_attachment_waits_for_explicit_download() {
         caption: "большое видео".into(),
         fwd_from: String::new(),
         fwd_anon: false,
+        album: 0x0A1B,
     };
     a.group_send_media(
         gid.clone(),
@@ -152,6 +153,7 @@ fn large_group_attachment_waits_for_explicit_download() {
         "размер приехал в сообщении"
     );
     assert_eq!(card["duration_ms"].as_u64(), Some(12_000));
+    assert_eq!(card["album"].as_u64(), Some(0x0A1B), "номер альбома доехал (п. 69)");
     assert_eq!(
         card["text"].as_str(),
         Some("большое видео"),
