@@ -123,6 +123,13 @@ internal fun EmojiPanel(
     val scope = rememberCoroutineScope()
     val searching = searchFocused || query.isNotBlank()
     val found = remember(entries, query) { entries?.let { EmojiIndex.search(it, query) }.orEmpty() }
+    // Клавиатура поднята (п. 53): тапнули в поле сообщения при открытой панели — над
+    // клавиатурой помещаются и панель, и поле, только если сетка ужмётся до двух рядов без
+    // подписей. Спрятали клавиатуру «назад» посреди поиска — поиск закончен: иначе панель
+    // оставалась свёрнутой в одну пустую строку.
+    val ime = rememberImeVisible()
+    val focus = LocalFocusManager.current
+    LaunchedEffect(ime) { if (!ime && searchFocused) focus.clearFocus() }
 
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
@@ -149,7 +156,7 @@ internal fun EmojiPanel(
         }
 
         // Недавние: реально в ходу десяток символов, они должны быть сразу под пальцем.
-        if (recent.isNotEmpty()) {
+        if (recent.isNotEmpty() && !ime) {
             SectionLabel(stringResource(R.string.emoji_recent))
             Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.s)) {
                 recent.take(8).forEach { e ->
@@ -159,9 +166,9 @@ internal fun EmojiPanel(
             }
         }
 
-        SectionLabel(stringResource(Groups[category].labelRes))
+        if (!ime) SectionLabel(stringResource(Groups[category].labelRes))
         val byGroup = remember(entries) { entries?.groupBy({ it.group }, { it.emoji }).orEmpty() }
-        HorizontalPager(pager, Modifier.fillMaxWidth().height(220.dp)) { page ->
+        HorizontalPager(pager, Modifier.fillMaxWidth().height(if (ime) 44.dp * GRID_ROWS_COMPACT else 220.dp)) { page ->
             LazyVerticalGrid(
                 columns = GridCells.Fixed(8),
                 modifier = Modifier.fillMaxSize().padding(horizontal = Tokens.Space.s),
@@ -235,6 +242,9 @@ private fun BackspaceKey(onBackspace: () -> Unit) {
         Icon(Icons.AutoMirrored.Filled.Backspace, label, tint = HoloSecondary, modifier = Modifier.size(Tokens.Size.iconM))
     }
 }
+
+/** Рядов сетки, пока поднята клавиатура: панель, поле и клавиатура — на одном экране. */
+private const val GRID_ROWS_COMPACT = 2
 
 /** Пауза до автоповтора и шаг — как у системной клавиатуры. */
 private const val REPEAT_START_MS = 400L
