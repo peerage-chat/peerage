@@ -182,6 +182,23 @@ fn own_rotation_keeps_the_contact_reachable() {
         b.history_json(&a_key),
     );
 
+    // «Поделиться контактом» (п. 66): код Алисы, выданный Бобом, несёт тот же подписанный
+    // адрес, что её собственный код, — третий добавит её и достучится. Местное имя
+    // «Алиса» — заметка Боба, в код не идёт (своего имени Алиса не задала).
+    let parse = |s: &str| {
+        peerage_core::code::ContactCode::parse(s, peerage_engine::NET).expect("код разбирается")
+    };
+    let shared = parse(&b.contact_code(&a_key).expect("Алиса — контакт Боба"));
+    let own = parse(&a.my_contact_code());
+    assert_eq!(shared.identity, a_key);
+    assert!(shared.address.is_some(), "в коде — адрес после смены");
+    assert_eq!(shared.address, own.address);
+    assert_eq!(shared.name, None, "местное имя не раздаётся");
+    assert!(
+        b.contact_code(&id(70).public_key_bytes()).is_none(),
+        "не контакт — кода нет"
+    );
+
     a.shutdown();
     b.shutdown();
 }

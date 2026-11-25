@@ -1386,6 +1386,21 @@ pub extern "system" fn Java_chat_peerage_Native_myContactCode<'local>(
     })
 }
 
+/// Код обмена контакта для «Поделиться контактом» (п. 66); "" — не контакт.
+#[no_mangle]
+pub extern "system" fn Java_chat_peerage_Native_contactCode<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_ptr: jlong,
+    key_hex: JString<'local>,
+) -> jstring {
+    jni_safe!(ret(&env, ""), {
+        let Some(e) = (unsafe { engine(session_ptr) }) else { return ret(&env, "") };
+        let Some(key) = parse_key(&jstr(&mut env, &key_hex)) else { return ret(&env, "") };
+        ret(&env, &e.contact_code(&key).unwrap_or_default())
+    })
+}
+
 /// Снимок офлайн-очереди: JSON {pending, bytes, peers, warn}. По `warn` клиент
 /// показывает предупреждение о разросшейся очереди (ничего не удаляется само).
 #[no_mangle]

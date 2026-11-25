@@ -160,13 +160,14 @@ internal fun ContactProfileScreen(
     }
 
     when (confirm) {
-        // Делимся ЧИСТЫМ ключом, без имени и пояснений: получатель вставляет строку в
-        // «Добавить контакт» как есть. Спрашиваем, потому что раздаётся чужая личность.
+        // Делимся КОДОМ контакта, без пояснений вокруг: получатель вставляет строку в
+        // «Добавить контакт» как есть. Голый ключ v2 не принимает — в коде подписанный
+        // адрес (п. 66). Спрашиваем, потому что раздаётся чужая личность.
         ProfileDanger.Share -> ConfirmSheet(
             title = stringResource(R.string.profile_share),
             text = stringResource(R.string.profile_share_confirm, c.displayName),
             ok = stringResource(R.string.profile_share_ok),
-            onOk = { shareText(ctx, c.key) },
+            onOk = { model.contactCode(c.key) { code -> if (code.isNotEmpty()) shareText(ctx, code) } },
             onClose = { confirm = null },
         )
         // Стирается только У СЕБЯ — это и сказано: у собеседника переписка останется.

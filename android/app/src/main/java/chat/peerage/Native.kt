@@ -230,6 +230,9 @@ object Native {
      *  привязкой к текущему адресу (иначе по коду до нас не достучатся). */
     external fun myContactCode(sessionPtr: Long): String
 
+    /** Код обмена контакта (п. 66): его личность и подписанный адрес; "" — не контакт. */
+    external fun contactCode(sessionPtr: Long, keyHex: String): String
+
     /** Контакты как JSON-массив. */
     external fun listContacts(sessionPtr: Long): String
 

@@ -1453,6 +1453,12 @@ class AppModel private constructor() {
 
     @Volatile private var started = false
 
+    /** Код контакта для «Поделиться контактом» (п. 66); пусто — не контакт. */
+    fun contactCode(key: String, onReady: (String) -> Unit) = ops.execute {
+        val code = Native.contactCode(sessionPtr, key)
+        onMain { onReady(code) }
+    }
+
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     /** Запись снапшот-состояния с фонового цикла — на главном потоке (см. тикер). */

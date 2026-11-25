@@ -1670,6 +1670,25 @@ impl Engine {
         .encode()
     }
 
+    /// Код обмена для КОНТАКТА — «Поделиться контактом» (п. 66): его личность, его
+    /// подписанная запись адреса (как пришла: подпись — его, подделать её мы не можем) и
+    /// его самоназвание. Местное имя — заметка этого пользователя, в код не идёт. Голый
+    /// ключ без адреса добавивший применить не может (v2), поэтому делимся кодом. `None` —
+    /// не контакт.
+    pub fn contact_code(&self, key: &[u8; 32]) -> Option<String> {
+        let contacts = self.contacts.lock_safe();
+        let c = contacts.get(key)?;
+        Some(
+            ContactCode {
+                kind: NET,
+                identity: *key,
+                address: contacts.known_record(key),
+                name: Some(c.profile_name.trim().to_string()).filter(|n| !n.is_empty()),
+            }
+            .encode(),
+        )
+    }
+
     /// Что за код обмена (экран «Добавить контакт»): `{status, key, name}`, где status —
     /// `"ok"` | `"invalid"` (не код) | `"newer"` (код новой версии — обновить приложение) |
     /// `"foreign"` (код профиля другой сети) | `"self"` (код этого телефона) | `"known"`

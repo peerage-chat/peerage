@@ -606,7 +606,7 @@
     <string name="profile_recheck">Verify again</string>
     <string name="profile_common_groups">Common groups</string>
     <string name="profile_share">Share contact</string>
-    <string name="profile_share_confirm">The key of %1$s goes to another person, who can then write directly. This cannot be undone.</string>
+    <string name="profile_share_confirm">The contact code of %1$s goes to another person, who can then add the contact and write directly. This cannot be undone.</string>
     <string name="profile_share_ok">Share</string>
     <string name="net_bench_row">Throughput test</string>
     <string name="net_bench_row_desc">Measures mesh speed to a contact</string>

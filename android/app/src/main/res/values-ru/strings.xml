@@ -632,7 +632,7 @@
     <string name="profile_recheck">Сверить заново</string>
     <string name="profile_common_groups">Общие группы</string>
     <string name="profile_share">Поделиться контактом</string>
-    <string name="profile_share_confirm">Ключ %1$s достанется другому человеку: тот сможет написать напрямую. Отозвать это нельзя.</string>
+    <string name="profile_share_confirm">Код контакта %1$s достанется другому человеку: по нему можно добавить контакт и написать напрямую. Отозвать это нельзя.</string>
     <string name="profile_share_ok">Поделиться</string>
     <string name="net_bench_row">Замер скорости</string>
     <string name="net_bench_row_desc">Скорость меша до выбранного контакта</string>
