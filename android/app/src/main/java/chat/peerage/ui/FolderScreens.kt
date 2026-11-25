@@ -142,7 +142,9 @@ internal fun FolderEditTopBar(model: AppModel, onBack: () -> Unit) {
 internal fun FolderEditorScreen(model: AppModel, folderId: String?, onDone: () -> Unit) {
     DisposableEffect(folderId) {
         model.folderDraft = folderId?.let { model.folderById(it) }
-            ?: Folder("f${System.currentTimeMillis()}", "", FolderIcons.first().first, types = setOf("dm"))
+            // Новая — пустая (п. 63): включённые «Личные» превращали папку из выбранных чатов
+            // во «все личные + выбранные», и это приходилось замечать и снимать.
+            ?: Folder("f${System.currentTimeMillis()}", "", FolderIcons.first().first)
         onDispose { model.commitFolderDraft() }
     }
     val d = model.folderDraft ?: return
@@ -233,9 +235,11 @@ internal fun FolderEditorScreen(model: AppModel, folderId: String?, onDone: () -
     }
 }
 
-/** Чаты для «И конкретные чаты»: сначала те, где писали недавно. «Сохранённое» — не чат для папки. */
+/** Чаты для «И конкретные чаты»: сначала те, где писали недавно; «Сохранённое» — тоже чат (п. 63). */
 private fun pickable(model: AppModel): List<ChatTarget> {
-    val all = model.contacts.map { ChatTarget(it.key, group = false) } + model.groups.map { ChatTarget(it.gid, group = true) }
+    val saved = listOfNotNull(model.me?.pubkey?.let { ChatTarget(it, group = false) })
+    val all = saved + model.contacts.filterNot { model.isSaved(it.key) }.map { ChatTarget(it.key, group = false) } +
+        model.groups.map { ChatTarget(it.gid, group = true) }
     return all.sortedByDescending { model.chatSummaries[model.chatKey(it.id, it.group)]?.lastTime ?: 0L }
 }
 

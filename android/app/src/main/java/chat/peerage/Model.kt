@@ -1038,8 +1038,13 @@ class AppModel private constructor() {
     fun folderById(id: String): Folder? = folders.firstOrNull { it.id == id }
 
     /** Сколько чатов попадает в папку [f] сейчас: живой счётчик редактора и подпись в списке. */
-    fun folderCount(f: Folder): Int =
-        contacts.count { folderHasDm(f, it.key) } + groups.count { folderHasGroup(f, it.gid) }
+    fun folderCount(f: Folder): Int {
+        // «Сохранённое» считается отдельно: в контактах его может не быть, а в список
+        // папки оно попадает (п. 63).
+        val mine = me?.pubkey
+        val saved = if (mine != null && folderHasDm(f, mine)) 1 else 0
+        return contacts.count { !isSaved(it.key) && folderHasDm(f, it.key) } + groups.count { folderHasGroup(f, it.gid) } + saved
+    }
 
     /**
      * Папка в редакторе: в модели, потому что её счётчик — в шапке, а правка — на панели.
