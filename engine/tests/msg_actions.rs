@@ -836,6 +836,45 @@ fn unseen_reactions_are_mine_to_see_and_clear() {
     );
 }
 
+/// П. 78: просмотренная реакция остаётся просмотренной, когда оба перезапускаются
+/// (обновление приложения убивает процесс у обоих) и связь восстанавливается.
+#[test]
+fn seen_reactions_stay_seen_across_restart() {
+    let net = LoopbackNet::new();
+    let (a_id, b_id) = (id(65), id(66));
+    let (a_key, b_key) = (a_id.public_key_bytes(), b_id.public_key_bytes());
+    let (a_dir, b_dir) = (tmpdir("seen-a"), tmpdir("seen-b"));
+    let a = start(&net, a_id.clone(), a_dir.clone());
+    let b = start(&net, b_id.clone(), b_dir.clone());
+    a.add_contact(&b_key, "Боб");
+    b.add_contact(&a_key, "Аня");
+    let author = hex::encode(a_key);
+    let unseen = |e: &Engine| -> serde_json::Value {
+        serde_json::from_str(&e.unseen_reactions_json(peerage_engine::ChatKey::Dm(b_key))).unwrap()
+    };
+
+    let id1 = a.send_text(&b_key, "первое").unwrap() as u64;
+    let id2 = a.send_text(&b_key, "второе").unwrap() as u64;
+    assert!(wait(10, || history(&b, &a_key).len() == 2), "дошли");
+    assert!(b.react(peerage_engine::ChatKey::Dm(a_key), id1, &author, "👍"));
+    assert!(b.react(peerage_engine::ChatKey::Dm(a_key), id2, &author, "❤️"));
+    assert!(wait(10, || unseen(&a).as_array().map(|v| v.len()) == Some(2)));
+    a.mark_reactions_seen(peerage_engine::ChatKey::Dm(b_key), id1, &author);
+    a.mark_reactions_seen(peerage_engine::ChatKey::Dm(b_key), id2, &author);
+    assert_eq!(unseen(&a), serde_json::json!([]));
+
+    a.shutdown();
+    b.shutdown();
+    drop((a, b));
+    let a = start(&net, a_id, a_dir);
+    let b = start(&net, b_id, b_dir);
+    // Время на досылку очередей после переподключения.
+    std::thread::sleep(Duration::from_secs(4));
+    assert_eq!(unseen(&a), serde_json::json!([]), "после перезапуска реакции не стали новыми");
+    a.shutdown();
+    b.shutdown();
+}
+
 /// Поиск в чате (2.9) через JSON-границу движка: счётчик и листание, фильтр
 /// отправителя, затем переход к находке — окно истории вокруг неё и дни месяца.
 #[test]
